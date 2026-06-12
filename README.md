@@ -24,12 +24,31 @@ npx serve .
 
 ## Deploy
 
-เกมเป็น static site — push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub Actions จะ publish ไฟล์ไปที่ branch `gh-pages` อัตโนมัติ
+### Render (แนะนำ)
 
-**เล่นออนไลน์ (พร้อมใช้งานแล้ว):** https://cdn.jsdelivr.net/gh/nustanakritwithai/Football-Manager-8-sec@gh-pages/
+มี `render.yaml` ใน repo แล้ว — เชื่อม GitHub repo กับ Render ได้ 2 วิธี:
 
-**GitHub Pages (ถ้าต้องการ URL แบบ github.io):** https://nustanakritwithai.github.io/Football-Manager-8-sec/  
-เปิดใช้ครั้งเดียวที่ **Settings → Pages → Build and deployment → Deploy from a branch** → เลือก branch `gh-pages` / folder `/ (root)`
+**วิธีที่ 1: Blueprint (ง่ายสุด)**  
+Render Dashboard → **New +** → **Blueprint** → เลือก repo `Football-Manager-8-sec` → Deploy
+
+**วิธีที่ 2: API / Script**  
+ตั้งค่า secrets แล้วรัน:
+
+```bash
+export RENDER_API_KEY="rnd_..."        # Account Settings → API Keys
+export RENDER_OWNER_ID="tea_..."         # Workspace Settings → Workspace ID
+# export RENDER_SERVICE_ID="srv_..."     # ถ้ามี service อยู่แล้ว ใส่แทนการสร้างใหม่
+./scripts/deploy-render.sh
+```
+
+### GitHub Pages / jsDelivr
+
+push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub Actions จะ publish ไปที่ branch `gh-pages` อัตโนมัติ
+
+**เล่นออนไลน์ (jsDelivr):** https://cdn.jsdelivr.net/gh/nustanakritwithai/Football-Manager-8-sec@gh-pages/
+
+**GitHub Pages:** https://nustanakritwithai.github.io/Football-Manager-8-sec/  
+เปิดใช้ที่ **Settings → Pages → Deploy from branch → `gh-pages` / `/ (root)`**
 
 ## วิธีเล่น
 

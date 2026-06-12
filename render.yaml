@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tactic-manager-lab
+    runtime: static
+    repo: https://github.com/nustanakritwithai/Football-Manager-8-sec
+    branch: claude/tactic-manager-lab-design-cvyqs9
+    buildCommand: echo "Static site — no build step"
+    staticPublishPath: .
+    headers:
+      - path: /src/*
+        name: Cache-Control
+        value: public, max-age=3600
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
