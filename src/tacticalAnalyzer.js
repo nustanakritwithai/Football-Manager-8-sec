@@ -24,7 +24,88 @@ export function analyze(state) {
     fatigueLoad: fatigueLoad(state, home, flags),
   };
 
+  // P2: ตรวจปัญหาการเคลื่อนที่และ progression
+  detectClustering(state, outfield, flags);
+  detectLostWidth(state, home, flags);
+  detectCarrierIsolation(state, home, flags);
+  detectProgressionIssues(state, flags);
+  detectRoleZoneViolation(state, home, flags);
+  detectOverPassing(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2 detections ----------
+
+// หาจุดที่ผู้เล่นทีมเรา >= 3 คนกองกันในรัศมี 6 เมตร
+function detectClustering(state, outfield, flags) {
+  const clusters = [];
+  const used = new Set();
+  for (const p of outfield) {
+    if (used.has(p.id)) continue;
+    const group = outfield.filter((q) => distP(p, q) < 6);
+    if (group.length >= 3) {
+      group.forEach((g) => used.add(g.id));
+      clusters.push({
+        x: average(group.map((g) => g.x)),
+        y: average(group.map((g) => g.y)),
+        count: group.length,
+        roles: group.map((g) => g.role),
+      });
+    }
+  }
+  flags.clusters = clusters;
+}
+
+// ทีมบุกแต่ไม่มีใครยืนกว้างเลย
+function detectLostWidth(state, home, flags) {
+  if (state.possessionTeam !== 'home') return;
+  const advanced = home.filter((p) => p.x > 52 && p.role !== 'GK');
+  if (advanced.length < 3) return;
+  const hasLeft = advanced.some((p) => p.y < 16);
+  const hasRight = advanced.some((p) => p.y > 52);
+  flags.lostWidth = !hasLeft && !hasRight ? 'both'
+    : !hasLeft ? 'left' : !hasRight ? 'right' : null;
+}
+
+// ผู้ถือบอลของเราโดดเดี่ยว ไม่มีตัว support ใกล้
+function detectCarrierIsolation(state, home, flags) {
+  const owner = state.ball.ownerPlayerId ? getPlayer(state, state.ball.ownerPlayerId) : null;
+  if (!owner || owner.team !== 'home' || owner.role === 'GK') return;
+  const support = home.filter((m) => m.id !== owner.id && distP(m, owner) < 14).length;
+  flags.carrierIsolated = support === 0 ? owner : null;
+}
+
+// อ่าน pass memory: ping-pong / ไม่มี progression
+function detectProgressionIssues(state, flags) {
+  const recent = state.passMemory?.recentPasses ?? [];
+  if (recent.length < 4) return;
+  const last4 = recent.slice(-4);
+  const totalProgress = last4.reduce((s, p) => s + p.progress, 0);
+  const uniquePlayers = new Set(last4.flatMap((p) => [p.fromId, p.toId]));
+  flags.pingPong = uniquePlayers.size <= 3 && totalProgress < 4;
+  flags.noProgression = totalProgress < 2;
+  flags.progressionScore = clamp(Math.round(50 + totalProgress * 4), 0, 100);
+}
+
+// นักเตะหลุด role zone ไกลเกิน (ไม่นับคนที่โค้ชสั่งเอง)
+function detectRoleZoneViolation(state, home, flags) {
+  const violations = [];
+  for (const p of home) {
+    if (p.role === 'GK' || p.commandLocked) continue;
+    const d = distP(p, { x: p.baseX, y: p.baseY });
+    const limit = p.role === 'CB' ? 24 : ['LB', 'RB', 'DM'].includes(p.role) ? 30 : 38;
+    if (d > limit) violations.push(p);
+  }
+  flags.roleViolations = violations;
+}
+
+// เทิร์นที่แล้วจ่ายเยอะแต่ไม่ carry เลย ทั้งที่ควรพาบอลขึ้นเองได้
+function detectOverPassing(state, flags) {
+  const st = state.lastTurnStats;
+  if (!st) return;
+  flags.overPassing = st.passes >= 5 && st.carries === 0;
+  flags.noOffBallRuns = state.possessionTeam === 'home' && st.runs === 0 && st.passes >= 3;
 }
 
 function defensiveStability(state, home, away, flags) {

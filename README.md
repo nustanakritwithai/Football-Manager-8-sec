@@ -52,10 +52,14 @@ push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub 
 
 ## วิธีเล่น
 
-1. **Planning** — ลากนักเตะทีมน้ำเงิน (ทีมเรา) ไปตำแหน่งที่ต้องการ เลือก formation
-   และปรับ team instructions (pressing, defensive line, width, tempo, passing style, risk)
-2. กด **▶ Play Next 8 Seconds** — ระบบจำลอง 8 วินาที (80 tick) นักเตะวิ่ง จ่ายบอล
-   เพรสซิ่ง สกัดบอล และอาจมีจังหวะยิงประตู
+1. **Planning** — ลากนักเตะทีมน้ำเงินเพื่อ **ออกคำสั่งวิ่ง** (ไม่ใช่ย้ายตำแหน่งทันที):
+   เส้นเหลือง = คำสั่ง, X = จุดหมาย, วงประ = รัศมีที่วิ่งถึงได้จริงใน 8 วินาที
+   (คิดจาก speed × stamina × role) ลากเกินระบบจะ clamp ให้ · ดับเบิลคลิก = ยกเลิกคำสั่ง
+   เลือก formation และปรับ team instructions ได้ตามปกติ
+2. กด **▶ Play Next 8 Seconds** — ระบบจำลอง 8 วินาที (80 tick) นักเตะค่อยๆ วิ่งตามคำสั่ง
+   ผู้ถือบอลตัดสินใจเองว่าจะ **pass / carry / dribble / hold / shoot / clear / switch play**
+   ส่วนคนไม่มีบอลวิ่งทำทางตาม role + team phase (ST วิ่งช่อง, ปีกถ่าง width,
+   fullback overlap, DM คุมหลังบอล)
 3. **Resolution** — ตำแหน่งสุดท้ายกลายเป็นสถานะจริงของเทิร์นถัดไป (ไม่ reset กลับ formation)
 4. **Analysis** — อ่าน tactical scores 8 ตัว, event log และคำแนะนำจาก AI Assistant
    (ghost สีเหลืองบนสนาม = ตำแหน่งที่ AI แนะนำ)
@@ -108,5 +112,27 @@ HTML + CSS + JavaScript (ES Modules) + Canvas API + localStorage — ไม่�
 simulation 8 วินาที + commit state จริง, path history, tactical scores 8 ตัว,
 AI Assistant rule-based + ghost suggestion, match clock, turn history (10 เทิร์นล่าสุด),
 save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อมโอกาสยิงประตู
+
+## P2: Tactical Intelligence
+
+ยกระดับ match engine จาก "ลากหมาก + จ่ายบอลวน" เป็น "ออกคำสั่งโค้ช + นักเตะตัดสินใจเอง":
+
+- **Movement radius** — ลาก = ตั้ง intended target ภายในรัศมีที่วิ่งถึงจริงใน 8 วินาที
+  ไม่มี teleport ตำแหน่งจริงเปลี่ยนเฉพาะระหว่าง simulation
+- **Ball carrier decision** — ผู้ถือบอลเลือก action ที่ดีที่สุดจาก
+  pass / carry ball / dribble 1v1 / hold รอเพื่อน / shoot / clear / switch play
+- **Off-ball movement** — ST วิ่งช่องระหว่าง CB, ปีกรักษา width หรือวิ่งหลังแบ็ก,
+  fullback overlap ตาม risk, DM อยู่หลังบอลกัน counter, ปีกถอยช่วยแบ็กตอนรับ
+- **Team phase** — BUILD_UP / ATTACKING / FINAL_THIRD / DEFENDING /
+  TRANSITION_TO_ATTACK / TRANSITION_TO_DEFENSE (มี counter-press ช่วง transition)
+- **Team objective** — buildUp, progressLeft/Right/Middle, attackHalfSpace,
+  switchPlay, counterAttack, highPress, midBlock, recoverShape — มีผลต่อทั้งการจ่าย
+  การ carry และการวิ่ง (แสดงบน scoreboard)
+- **Anti-clustering** — separation force + congestion grid 8×5 กันนักเตะกองรวมกัน
+  และลดคะแนนจ่าย/วิ่งเข้าโซนแน่น
+- **Pass memory + progression** — กัน ping-pong passing, โทษการจ่ายถอยไร้เหตุผล,
+  through pass ให้ runner ที่กำลังวิ่งเข้า space
+- **AI Assistant ใหม่** — เตือน clustering, เสีย width, ผู้ถือบอลโดดเดี่ยว,
+  ส่งบอลวนไม่ progress, ไม่มี off-ball run, CB/DM หลุดโซน
 
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime

@@ -40,4 +40,35 @@ export const COLORS = {
 };
 
 export const STORAGE_KEY = 'tactic-manager-lab-save-v1';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+
+// ---------- P2: Tactical Intelligence ----------
+
+export const SIM_SECONDS = TURN_SECONDS;
+
+// อิสระในการเคลื่อนที่ต่อ role (คูณกับ movement radius)
+export const ROLE_FREEDOM = {
+  GK: 0.35, CB: 0.55, LB: 0.75, RB: 0.75, DM: 0.65,
+  CM: 0.75, AM: 0.8, LW: 0.95, RW: 0.95, ST: 0.85,
+};
+export const MAX_MOVEMENT_RADIUS = 45; // เมตร เพดานต่อเทิร์น
+
+// anti-clustering
+export const MIN_PLAYER_SPACING = 4.5;  // เมตร
+export const SEPARATION_FORCE = 0.8;
+export const CONGESTION_GRID = { cols: 8, rows: 5 };
+export const CONGESTION_LIMIT = 3;      // เพื่อนร่วมทีมต่อโซนก่อนถือว่าแน่น
+
+// ball carrier decision
+export const CARRY_SPACE_THRESHOLD = 6;   // เมตรพื้นที่ว่างด้านหน้าขั้นต่ำก่อนพิจารณา carry
+export const DRIBBLE_PRESSURE_MAX = 1.8;
+export const HOLD_PRESSURE_LIMIT = 1.5;
+
+// pass memory
+export const PASS_MEMORY_SIZE = 8;
+
+export const DEBUG = {
+  showIntents: true,     // เส้น intent / run target ระหว่าง simulation
+  showPhase: true,       // แสดง team phase + objective บน scoreboard
+  showCongestion: false, // highlight โซนแออัด
+};
