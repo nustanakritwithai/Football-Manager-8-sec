@@ -1,12 +1,14 @@
-// mouse/touch: ลากนักเตะทีมเรา เลือกนักเตะ hover tooltip
+// mouse/touch: ลาก = ตั้งคำสั่ง (intended target) ไม่ใช่ย้ายตำแหน่งจริง (P2)
+// ตำแหน่งจริงเปลี่ยนเฉพาะระหว่าง simulation 8 วินาที
 
 import { MARGIN, SCALE, PITCH } from './config.js';
-import { clamp } from './utils.js';
+import { clamp, dist } from './utils.js';
 import { getPlayer } from './team.js';
+import { movementRadius } from './player.js';
 
 const HIT_RADIUS_PX = 13;
 
-export function initInput(canvas, state, onChange) {
+export function initInput(canvas, state, onChange, onClamp) {
   function toField(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -25,11 +27,31 @@ export function initInput(canvas, state, onChange) {
     return found;
   }
 
+  // clamp เป้าหมายให้อยู่ใน movement radius ของนักเตะ + ในสนาม
+  function setIntent(p, pos) {
+    let tx = clamp(pos.x, 0.5, PITCH.length - 0.5);
+    let ty = clamp(pos.y, 0.5, PITCH.width - 0.5);
+    const r = movementRadius(p);
+    const d = dist(p.x, p.y, tx, ty);
+    let clamped = false;
+    if (d > r) {
+      tx = p.x + ((tx - p.x) / d) * r;
+      ty = p.y + ((ty - p.y) / d) * r;
+      clamped = true;
+    }
+    p.intendedTarget = { x: tx, y: ty };
+    p.commandType = 'move';
+    p.commandLocked = true;
+    p.lastCommandTurn = state.turn;
+    return clamped;
+  }
+
+  let clampWarnedThisDrag = false;
+
   canvas.addEventListener('pointerdown', (e) => {
     const pos = toField(e);
     const p = hitPlayer(pos);
 
-    // เลือกได้ทุกคน (ดูข้อมูล) แต่ลากได้เฉพาะทีมเราในช่วง planning
     if (state.ui.selectedId) {
       const prev = getPlayer(state, state.ui.selectedId);
       if (prev) prev.isSelected = false;
@@ -39,6 +61,7 @@ export function initInput(canvas, state, onChange) {
 
     if (p && p.team === 'home' && state.phase === 'planning') {
       state.ui.dragId = p.id;
+      clampWarnedThisDrag = false;
       canvas.setPointerCapture(e.pointerId);
     }
     onChange();
@@ -52,11 +75,11 @@ export function initInput(canvas, state, onChange) {
     if (state.ui.dragId && state.phase === 'planning') {
       const p = getPlayer(state, state.ui.dragId);
       if (p) {
-        p.x = clamp(pos.x, 0.5, PITCH.length - 0.5);
-        p.y = clamp(pos.y, 0.5, PITCH.width - 0.5);
-        p.targetX = p.x;
-        p.targetY = p.y;
-        state.ui.scoresDirty = true;
+        const clamped = setIntent(p, pos);
+        if (clamped && !clampWarnedThisDrag) {
+          clampWarnedThisDrag = true;
+          onClamp?.(p);
+        }
       }
     } else {
       const hover = hitPlayer(pos);
@@ -64,7 +87,7 @@ export function initInput(canvas, state, onChange) {
     }
   });
 
-  function endDrag(e) {
+  function endDrag() {
     if (state.ui.dragId) {
       state.ui.dragId = null;
       state.ui.scoresDirty = true;
@@ -74,4 +97,14 @@ export function initInput(canvas, state, onChange) {
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
   canvas.addEventListener('pointerleave', () => { state.ui.hoverId = null; });
+
+  // double click = ยกเลิกคำสั่งของนักเตะ
+  canvas.addEventListener('dblclick', (e) => {
+    const p = hitPlayer(toField(e));
+    if (p && p.team === 'home' && state.phase === 'planning') {
+      p.intendedTarget = null;
+      p.commandLocked = false;
+      onChange();
+    }
+  });
 }

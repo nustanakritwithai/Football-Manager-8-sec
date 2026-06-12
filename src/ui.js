@@ -1,8 +1,8 @@
 // dashboard ด้านขวา + overlay บนสนาม (paths, lanes, pressure, ghosts) + tooltip
 
-import { COLORS, MATCH_TURNS, TURN_SECONDS } from './config.js';
+import { COLORS, DEBUG, MATCH_TURNS, TURN_SECONDS, SCALE, CONGESTION_GRID, CONGESTION_LIMIT, PITCH } from './config.js';
 import { clamp, distP, formatClock } from './utils.js';
-import { toPx, toPy, drawPlayerPath } from './player.js';
+import { toPx, toPy, drawPlayerPath, movementRadius } from './player.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { passOptions } from './simulation.js';
 import { FORMATION_NAMES } from './formations.js';
@@ -22,7 +22,7 @@ const els = {};
 
 export function initUI(state, handlers) {
   const ids = [
-    'clock', 'turn', 'phase', 'scoreline', 'awayStyle',
+    'clock', 'turn', 'phase', 'scoreline', 'awayStyle', 'teamPhase',
     'btnPlay', 'btnReset', 'btnSave', 'btnLoad', 'btnExport', 'btnImport', 'btnClearPaths',
     'importFile', 'simSpeed', 'formation', 'scoreBars', 'assistantBox', 'eventList',
     'playerInfo', 'tooltip', 'statusMsg', 'historyList',
@@ -107,6 +107,12 @@ export function updateDashboard(state) {
   const phaseLabel = { planning: 'Planning', simulating: 'Simulating…', finished: 'Match Finished' };
   els.phase.textContent = phaseLabel[state.phase] || state.phase;
   els.phase.className = `phase phase-${state.phase}`;
+
+  if (els.teamPhase) {
+    els.teamPhase.textContent = DEBUG.showPhase
+      ? `ทีมเรา: ${state.teamPhases?.home ?? '–'} · ${state.teamObjectives?.home ?? '–'}`
+      : '';
+  }
 
   const busy = state.phase === 'simulating';
   els.btnPlay.disabled = busy || state.phase === 'finished';
@@ -197,10 +203,115 @@ function updatePlayerInfo(state) {
 
 export function drawOverlays(ctx, state) {
   drawDangerZones(ctx, state);
+  drawCongestion(ctx, state);
   for (const p of state.players) drawPlayerPath(ctx, p);
   drawPassingLanes(ctx, state);
   drawPressureCircle(ctx, state);
+  drawIntents(ctx, state);
+  drawRunArrows(ctx, state);
+  drawCarrierAction(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P2: วง movement radius + เส้นคำสั่งไปยัง intended target
+function drawIntents(ctx, state) {
+  if (state.phase !== 'planning') return;
+
+  for (const p of teamPlayers(state, 'home')) {
+    const selected = state.ui.selectedId === p.id;
+
+    // วงรัศมีการวิ่ง 8 วิ เฉพาะตัวที่เลือก
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(toPx(p.x), toPy(p.y), movementRadius(p) * SCALE, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      ctx.fill();
+    }
+
+    // เส้นคำสั่ง + เป้าหมาย
+    if (p.intendedTarget) {
+      const tx = toPx(p.intendedTarget.x), ty = toPy(p.intendedTarget.y);
+      ctx.beginPath();
+      ctx.moveTo(toPx(p.x), toPy(p.y));
+      ctx.lineTo(tx, ty);
+      ctx.strokeStyle = COLORS.ghost;
+      ctx.lineWidth = selected ? 2 : 1.2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // เครื่องหมาย X ที่เป้าหมาย
+      ctx.strokeStyle = COLORS.ghost;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(tx - 4, ty - 4); ctx.lineTo(tx + 4, ty + 4);
+      ctx.moveTo(tx + 4, ty - 4); ctx.lineTo(tx - 4, ty + 4);
+      ctx.stroke();
+    }
+  }
+}
+
+// P2: ลูกศร off-ball run ระหว่าง simulation
+function drawRunArrows(ctx, state) {
+  if (state.phase !== 'simulating' || !DEBUG.showIntents) return;
+  for (const p of teamPlayers(state, 'home')) {
+    if (!p.runTarget || !['runIntoSpace', 'overlap'].includes(p.runType)) continue;
+    const x1 = toPx(p.x), y1 = toPy(p.y);
+    const x2 = toPx(p.runTarget.x), y2 = toPy(p.runTarget.y);
+    if (Math.hypot(x2 - x1, y2 - y1) < 20) continue;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = 'rgba(120,230,250,0.45)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // หัวลูกศร
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 7 * Math.cos(ang - 0.4), y2 - 7 * Math.sin(ang - 0.4));
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 7 * Math.cos(ang + 0.4), y2 - 7 * Math.sin(ang + 0.4));
+    ctx.strokeStyle = 'rgba(120,230,250,0.6)';
+    ctx.stroke();
+  }
+}
+
+// P2: ป้าย action ของผู้ถือบอล (Carry / Dribble / Hold / ...)
+function drawCarrierAction(ctx, state) {
+  if (state.phase !== 'simulating') return;
+  const la = state.sim?.lastAction;
+  if (!la) return;
+  const p = getPlayer(state, la.playerId);
+  if (!p || state.ball.ownerPlayerId !== p.id) return;
+  const labels = {
+    pass: 'Pass', carry: 'Carry', dribble: 'Dribble', hold: 'Hold',
+    shoot: 'Shoot!', clear: 'Clear', switch: 'Switch',
+  };
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(labels[la.type] || la.type, toPx(p.x), toPy(p.y) - 16);
+}
+
+// P2: highlight โซนแออัด (debug)
+function drawCongestion(ctx, state) {
+  if (!DEBUG.showCongestion || !state.sim?.congestion) return;
+  const zw = (PITCH.length / CONGESTION_GRID.cols) * SCALE;
+  const zh = (PITCH.width / CONGESTION_GRID.rows) * SCALE;
+  state.sim.congestion.forEach((z, i) => {
+    if (z.home + z.away < CONGESTION_LIMIT + 2) return;
+    const col = i % CONGESTION_GRID.cols;
+    const row = Math.floor(i / CONGESTION_GRID.cols);
+    ctx.fillStyle = 'rgba(255,140,0,0.12)';
+    ctx.fillRect(toPx(0) + col * zw, toPy(0) + row * zh, zw, zh);
+  });
 }
 
 function drawPassingLanes(ctx, state) {

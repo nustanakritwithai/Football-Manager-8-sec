@@ -118,6 +118,80 @@ export function generateAdvice(state, analysis, events, prevScores) {
     });
   }
 
+  // --- P2: clustering / spacing ---
+  if (flags.clusters?.length) {
+    const c = flags.clusters[0];
+    const zoneY = c.y < 23 ? 'ซ้าย' : c.y > 45 ? 'ขวา' : 'กลาง';
+    const zoneX = c.x < 35 ? 'แดนหลัง' : c.x > 70 ? 'แดนหน้า' : 'กลางสนาม';
+    candidates.push({
+      priority: 76, severity: 'warn',
+      text: `ผู้เล่น ${c.count} คน (${c.roles.join(', ')}) กองกันโซน${zoneX}ฝั่ง${zoneY} เสีย spacing และ passing option ลองถ่างออกหรือสั่ง runWide`,
+    });
+  }
+
+  // --- P2: ping-pong / no progression ---
+  if (flags.pingPong) {
+    candidates.push({
+      priority: 66, severity: 'warn',
+      text: 'ทีมส่งบอลวนระหว่างผู้เล่นกลุ่มเดิมโดยไม่พาบอลขึ้นหน้า ลองเปิดบอลไปฝั่งที่มีพื้นที่หรือให้กองกลางพาบอลขึ้นเอง',
+    });
+  } else if (flags.noProgression && state.possessionTeam === 'home') {
+    candidates.push({
+      priority: 62, severity: 'info',
+      text: 'หลายจังหวะล่าสุดบอลไม่ขยับเข้าใกล้ประตูคู่แข่งเลย หาช่องส่งเข้า half-space หรือ switch play ไปฝั่งไกล',
+    });
+  }
+
+  // --- P2: overpassing / ไม่มี off-ball run ---
+  if (flags.overPassing) {
+    candidates.push({
+      priority: 57, severity: 'info',
+      text: 'เทิร์นที่แล้วทีมเอาแต่จ่ายบอลทั้งที่มีพื้นที่ให้พาบอลขึ้นหน้าเอง CM/AM ควร carry เข้าพื้นที่ว่างมากขึ้น',
+    });
+  }
+  if (flags.noOffBallRuns) {
+    candidates.push({
+      priority: 56, severity: 'info',
+      text: 'ทีมมีบอลแต่ไม่มีใครวิ่งทำทางเลย กองหน้ากับปีกควรวิ่งเข้าพื้นที่ว่างเพื่อเปิดเกม',
+    });
+  }
+
+  // --- P2: เสีย width ---
+  if (flags.lostWidth) {
+    const side = flags.lostWidth === 'both' ? 'ทั้งสองฝั่ง' : flags.lostWidth === 'left' ? 'ฝั่งซ้าย' : 'ฝั่งขวา';
+    const winger = home.find((p) => (flags.lostWidth === 'right' ? p.role === 'RW' : p.role === 'LW'));
+    candidates.push({
+      priority: 59, severity: 'warn',
+      text: `ทีมเสียความกว้าง${side} ปีกหุบเข้ากลางหมดทำให้แนวรับคู่แข่งหุบตาม ลองดันปีกออกริมเส้นเพื่อเปิด passing lane`,
+      ghost: winger ? {
+        playerId: winger.id,
+        x: winger.x,
+        y: winger.role === 'LW' ? 8 : 60,
+        label: 'ถ่างออก',
+      } : null,
+    });
+  }
+
+  // --- P2: ผู้ถือบอลโดดเดี่ยว ---
+  if (flags.carrierIsolated) {
+    const c = flags.carrierIsolated;
+    candidates.push({
+      priority: 64, severity: 'warn',
+      text: `${c.role} (#${c.number}) ถือบอลแบบโดดเดี่ยว ไม่มีเพื่อนในระยะ 14 เมตร เสี่ยงเสียบอล ขยับ CM/AM เข้าไป support`,
+    });
+  }
+
+  // --- P2: หลุด role zone ---
+  if (flags.roleViolations?.length) {
+    const v = flags.roleViolations[0];
+    if (['CB', 'DM'].includes(v.role)) {
+      candidates.push({
+        priority: 71, severity: 'warn',
+        text: `${v.role} (#${v.number}) หลุดออกจากโซนรับของตัวเองไกลมาก แนวรับเสีย shape ปล่อยให้เขากลับตำแหน่งหรือสั่งถอยกลับ`,
+      });
+    }
+  }
+
   // --- ข้อความเชิงบวกเมื่อการแก้เกมได้ผล ---
   if (prevScores) {
     if (prevScores.counterRisk - scores.counterRisk >= 12) {

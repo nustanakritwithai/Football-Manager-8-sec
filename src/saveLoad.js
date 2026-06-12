@@ -3,6 +3,7 @@
 import { SAVE_VERSION, STORAGE_KEY, PITCH } from './config.js';
 import { isValidFormation } from './formations.js';
 import { isNum } from './utils.js';
+import { defaultCommand } from './player.js';
 
 export function serialize(state) {
   return {
@@ -25,6 +26,8 @@ export function serialize(state) {
       pressing: p.pressing, tackling: p.tackling, vision: p.vision,
       positioning: p.positioning, shooting: p.shooting,
       discipline: p.discipline, aggression: p.aggression, decision: p.decision,
+      intendedTarget: p.intendedTarget ?? null,
+      commandType: p.commandType ?? null,
     })),
     ball: { ...state.ball },
     tacticalScores: state.tacticalScores ? { ...state.tacticalScores } : null,
@@ -67,7 +70,7 @@ export function applySave(state, data) {
   Object.assign(state.teams.home, data.teams.home);
   Object.assign(state.teams.away, data.teams.away);
 
-  // จับคู่นักเตะตาม id
+  // จับคู่นักเตะตาม id — save เก่า (v1) ไม่มี field P2 ให้ใส่ default
   for (const saved of data.players) {
     const p = state.players.find((q) => q.id === saved.id);
     if (!p) continue;
@@ -75,7 +78,17 @@ export function applySave(state, data) {
     p.pathHistory = [];
     p.isSelected = false;
     p._staminaWarned = false;
+    p.intendedTarget = saved.intendedTarget ?? null;
+    p.commandType = saved.commandType ?? defaultCommand(p.role);
+    p.commandLocked = !!p.intendedTarget;
+    p.runType = null;
+    p.runTarget = null;
+    p.currentAction = null;
   }
+  state.passMemory = { lastPasserId: null, lastReceiverId: null, recentPasses: [] };
+  state.teamPhases = { home: 'BUILD_UP', away: 'DEFENDING' };
+  state.teamObjectives = { home: 'buildUp', away: 'midBlock' };
+  state.lastTurnStats = { passes: 0, carries: 0, dribbles: 0, runs: 0 };
 
   Object.assign(state.ball, data.ball);
   state.tacticalScores = data.tacticalScores || null;

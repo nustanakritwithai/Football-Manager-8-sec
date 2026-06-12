@@ -1,6 +1,6 @@
 // player object และการวาดนักเตะ
 
-import { COLORS, MARGIN, SCALE } from './config.js';
+import { COLORS, MARGIN, SCALE, MAX_MOVEMENT_RADIUS, ROLE_FREEDOM, SIM_SECONDS } from './config.js';
 import { clamp, rand } from './utils.js';
 
 // ค่า attribute พื้นฐานตาม role (0-100)
@@ -44,7 +44,38 @@ export function createPlayer({ id, name, team, role, number, x, y }) {
     decision: vary(base.decision),
     isSelected: false,
     pathHistory: [],
+    // P2: คำสั่งโค้ช — ลาก = ตั้งเจตนา ไม่ใช่ย้ายตำแหน่ง
+    intendedTarget: null,            // { x, y } | null
+    commandType: defaultCommand(role),
+    commandLocked: false,            // มีคำสั่งจากผู้เล่นในเทิร์นนี้
+    lastCommandTurn: 0,
+    currentAction: null,             // action ล่าสุดตอนถือบอล
+    runType: null,                   // 'runIntoSpace' | 'overlap' | 'support' | ...
+    runTarget: null,                 // { x, y }
   };
+}
+
+export function defaultCommand(role) {
+  return ['GK', 'CB', 'DM'].includes(role) ? 'hold' : 'move';
+}
+
+export function staminaFactor(p) {
+  return 0.55 + 0.45 * (p.stamina / 100);
+}
+
+export function roleFreedom(p) {
+  return ROLE_FREEDOM[p.role] ?? 0.75;
+}
+
+// ระยะวิ่งสูงสุดที่เป็นไปได้ใน 8 วินาที (เมตร)
+export function movementRadius(p) {
+  const base = 4.2 + (p.speed / 100) * 3.4;
+  return Math.min(base * SIM_SECONDS * staminaFactor(p) * roleFreedom(p), MAX_MOVEMENT_RADIUS);
+}
+
+// ตำแหน่งบ้านของ role (ใช้ดึงกลับ shape) = formation base
+export function roleHome(p) {
+  return { x: p.baseX, y: p.baseY };
 }
 
 // ความเร็วจริง (เมตร/วินาที) คิดจาก attribute และ stamina

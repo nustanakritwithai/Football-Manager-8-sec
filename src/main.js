@@ -18,7 +18,11 @@ const ctx = canvas.getContext('2d');
 
 const state = createInitialState('4-2-3-1');
 
-initInput(canvas, state, () => updateDashboard(state));
+initInput(
+  canvas, state,
+  () => updateDashboard(state),
+  (p) => setStatus(`${p.role} #${p.number} วิ่งไม่ถึงจุดนั้นใน 8 วิ — จำกัดเป้าหมายตามรัศมีให้แล้ว`),
+);
 
 initUI(state, {
   onPlay() {

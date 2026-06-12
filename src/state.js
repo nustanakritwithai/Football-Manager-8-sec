@@ -21,6 +21,11 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     possessionTeam: 'home',
     tacticalScores: null,
     prevScores: null,
+    // P2: tactical intelligence
+    teamPhases: { home: 'BUILD_UP', away: 'DEFENDING' },
+    teamObjectives: { home: 'buildUp', away: 'midBlock' },
+    passMemory: { lastPasserId: null, lastReceiverId: null, recentPasses: [] },
+    lastTurnStats: { passes: 0, carries: 0, dribbles: 0, runs: 0 },
     lastTurnEvents: [],
     assistant: { messages: [], ghosts: [] },
     history: [],
@@ -75,6 +80,10 @@ export function applyFormation(state, formationName) {
     p.targetX = pos.x; p.targetY = pos.y;
     p.baseX = pos.x; p.baseY = pos.y;
     p.pathHistory = [];
+    p.intendedTarget = null;
+    p.commandLocked = false;
+    p.runType = null;
+    p.runTarget = null;
   });
   state.ui.scoresDirty = true;
 }
@@ -92,7 +101,12 @@ export function resetFormation(state) {
     p.targetX = pos.x; p.targetY = pos.y;
     p.baseX = pos.x; p.baseY = pos.y;
     p.pathHistory = [];
+    p.intendedTarget = null;
+    p.commandLocked = false;
+    p.runType = null;
+    p.runTarget = null;
   });
+  state.passMemory = { lastPasserId: null, lastReceiverId: null, recentPasses: [] };
   kickoff(state, 'home');
   state.assistant = { messages: [{ text: 'รีเซ็ตตำแหน่งกลับ formation เริ่มต้นแล้ว', severity: 'info' }], ghosts: [] };
   state.ui.scoresDirty = true;
