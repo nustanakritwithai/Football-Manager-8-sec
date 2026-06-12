@@ -22,6 +22,14 @@ npx serve .
 
 แล้วเปิด `http://localhost:8000` ในเบราว์เซอร์
 
+## Deploy (GitHub Pages)
+
+เกมเป็น static site — push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub Actions จะ deploy อัตโนมัติ
+
+**Live URL:** https://nustanakritwithai.github.io/Football-Manager-8-sec/
+
+ครั้งแรก (ถ้ายังไม่เคยเปิด Pages): ไปที่ repo **Settings → Pages → Build and deployment → Source** แล้วเลือก **GitHub Actions**
+
 ## วิธีเล่น
 
 1. **Planning** — ลากนักเตะทีมน้ำเงิน (ทีมเรา) ไปตำแหน่งที่ต้องการ เลือก formation
