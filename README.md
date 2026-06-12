@@ -22,13 +22,14 @@ npx serve .
 
 แล้วเปิด `http://localhost:8000` ในเบราว์เซอร์
 
-## Deploy (GitHub Pages)
+## Deploy
 
-เกมเป็น static site — push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub Actions จะ deploy อัตโนมัติ
+เกมเป็น static site — push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub Actions จะ publish ไฟล์ไปที่ branch `gh-pages` อัตโนมัติ
 
-**Live URL:** https://nustanakritwithai.github.io/Football-Manager-8-sec/
+**เล่นออนไลน์ (พร้อมใช้งานแล้ว):** https://cdn.jsdelivr.net/gh/nustanakritwithai/Football-Manager-8-sec@gh-pages/
 
-ครั้งแรก (ถ้ายังไม่เคยเปิด Pages): ไปที่ repo **Settings → Pages → Build and deployment → Source** แล้วเลือก **GitHub Actions**
+**GitHub Pages (ถ้าต้องการ URL แบบ github.io):** https://nustanakritwithai.github.io/Football-Manager-8-sec/  
+เปิดใช้ครั้งเดียวที่ **Settings → Pages → Build and deployment → Deploy from a branch** → เลือก branch `gh-pages` / folder `/ (root)`
 
 ## วิธีเล่น
 
