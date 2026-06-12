@@ -131,6 +131,25 @@ function finishSimulation(state) {
   });
   if (state.history.length > MAX_HISTORY) state.history.shift();
 
+  // P3: replay dataset — บันทึกข้อมูลต่อเทิร์นแบบกะทัดรัดสำหรับ export
+  if (!Array.isArray(state.replayLog)) state.replayLog = [];
+  state.replayLog.push({
+    turn: state.turn,
+    phase: state.teamPhases.home,
+    objective: state.teamObjectives.home,
+    possessionStart: sim.possessionStart,
+    possessionEnd: state.possessionTeam,
+    start: sim.startSnapshot,
+    end: snapshotPositions(state),
+    ballStart: sim.ballStart,
+    ballEnd: { x: +state.ball.x.toFixed(1), y: +state.ball.y.toFixed(1) },
+    stats: { ...sim.stats.home },
+    shots: state.lastTurnEvents.filter((e) => e.includes('Shot chance')).length,
+    goal: sim.goalScored,
+    scores: { ...analysis.scores },
+  });
+  if (state.replayLog.length > 200) state.replayLog.shift();
+
   state.turn++;
   state.sim = null;
   state.phase = isMatchOver(state) ? 'finished' : 'planning';

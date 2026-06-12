@@ -51,6 +51,17 @@
       </section>
 
       <section class="card">
+        <h3>TacticAI Tools</h3>
+        <div class="row wrap">
+          <button id="btnPreview" class="btn-sm">👁 Preview 8s</button>
+          <button id="btnAdjust" class="btn-sm">🛡 Adjust (AI จัดรับ)</button>
+          <button id="btnApplyGhosts" class="btn-sm">✅ ใช้คำแนะนำ AI</button>
+          <button id="btnCorner" class="btn-sm">⚽ ซ้อมเตะมุม</button>
+        </div>
+        <div id="previewSummary" class="muted" style="margin-top:6px;font-size:12px"></div>
+      </section>
+
+      <section class="card">
         <h3>Formation &amp; Team Instructions</h3>
         <label class="row">Formation <select id="formation"></select></label>
         <label class="slider-row">Pressing <input type="range" id="pressingLevel" min="1" max="5" step="1"></label>
@@ -70,6 +81,7 @@
       <section class="card">
         <h3>Tactical Scores</h3>
         <div id="scoreBars"></div>
+        <div id="xgRow" class="xg-row"></div>
       </section>
 
       <section class="card">
@@ -99,6 +111,7 @@
           <button id="btnLoad" class="btn-sm">Load</button>
           <button id="btnExport" class="btn-sm">Export JSON</button>
           <button id="btnImport" class="btn-sm">Import JSON</button>
+          <button id="btnExportDataset" class="btn-sm">Export Dataset</button>
           <input type="file" id="importFile" accept=".json,application/json" hidden>
         </div>
       </section>

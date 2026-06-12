@@ -26,6 +26,7 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     teamObjectives: { home: 'buildUp', away: 'midBlock' },
     passMemory: { lastPasserId: null, lastReceiverId: null, recentPasses: [] },
     lastTurnStats: { passes: 0, carries: 0, dribbles: 0, runs: 0 },
+    replayLog: [], // P3: dataset ต่อเทิร์นสำหรับ export ไปฝึกโมเดลภายหลัง
     lastTurnEvents: [],
     assistant: { messages: [], ghosts: [] },
     history: [],

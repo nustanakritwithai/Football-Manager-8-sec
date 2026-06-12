@@ -175,6 +175,15 @@ select, input[type="range"] {
 }
 .score-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 
+/* P3: shot probability (xG) */
+.xg-row {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #262d3b;
+  font-size: 12px;
+}
+.xg-row .score-row { grid-template-columns: 150px 1fr 38px; }
+
 /* assistant */
 .assistant-msg {
   border-left: 3px solid var(--muted);

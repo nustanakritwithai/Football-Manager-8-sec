@@ -192,6 +192,15 @@ export function generateAdvice(state, analysis, events, prevScores) {
     }
   }
 
+  // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
+  if (flags.similarTurn?.danger) {
+    const s = flags.similarTurn;
+    candidates.push({
+      priority: 67, severity: 'warn',
+      text: `รูปเกมตอนนี้คล้ายเทิร์น ${s.turnNumber}${s.mirrored ? ' (สลับฝั่งกระจก)' : ''} ที่คุณโดนคู่แข่งสร้างโอกาส — อย่าแก้เกมแบบเดิม ลองเปลี่ยนโครงสร้างก่อนกด Play`,
+    });
+  }
+
   // --- ข้อความเชิงบวกเมื่อการแก้เกมได้ผล ---
   if (prevScores) {
     if (prevScores.counterRisk - scores.counterRisk >= 12) {
