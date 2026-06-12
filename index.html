@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tactic Manager Lab — ฟุตบอลทีละ 8 วินาที</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="left">
+      <header id="scoreboard">
+        <div class="sb-row">
+          <span id="scoreline">Tactic Lab FC 0 - 0 Rival United</span>
+          <span id="awayStyle" class="muted"></span>
+        </div>
+        <div class="sb-row">
+          <span id="clock" class="clock">00:00</span>
+          <span id="turn">เทิร์น 1/38</span>
+          <span id="phase" class="phase phase-planning">Planning</span>
+        </div>
+      </header>
+
+      <canvas id="pitchCanvas"></canvas>
+
+      <div id="legend">
+        <span><i class="dot" style="background:#2f6fed"></i> ทีมเรา (ลากได้)</span>
+        <span><i class="dot" style="background:#e0473d"></i> คู่แข่ง</span>
+        <span><i class="dot" style="background:#f7f4e9"></i> ลูกบอล</span>
+        <span><i class="dot ghost-dot"></i> คำแนะนำ AI</span>
+        <span class="muted">เส้นประเขียว = passing lane ปลอดภัย</span>
+      </div>
+    </div>
+
+    <aside id="panel">
+      <section class="card">
+        <button id="btnPlay" class="btn-play">▶ Play Next 8 Seconds</button>
+        <div class="row">
+          <label>ความเร็ว
+            <select id="simSpeed">
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+          <button id="btnClearPaths" class="btn-sm">Clear Paths</button>
+          <button id="btnReset" class="btn-sm">Reset Formation</button>
+        </div>
+        <div id="statusMsg" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h3>Formation &amp; Team Instructions</h3>
+        <label class="row">Formation <select id="formation"></select></label>
+        <label class="slider-row">Pressing <input type="range" id="pressingLevel" min="1" max="5" step="1"></label>
+        <label class="slider-row">Def. Line <input type="range" id="defensiveLine" min="1" max="5" step="1"></label>
+        <label class="slider-row">Width <input type="range" id="attackingWidth" min="1" max="5" step="1"></label>
+        <label class="slider-row">Tempo <input type="range" id="tempo" min="1" max="5" step="1"></label>
+        <label class="slider-row">Risk <input type="range" id="riskLevel" min="1" max="5" step="1"></label>
+        <label class="row">Passing
+          <select id="passingStyle">
+            <option value="short">Short</option>
+            <option value="mixed">Mixed</option>
+            <option value="direct">Direct</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card">
+        <h3>Tactical Scores</h3>
+        <div id="scoreBars"></div>
+      </section>
+
+      <section class="card">
+        <h3>AI Assistant</h3>
+        <div id="assistantBox"></div>
+      </section>
+
+      <section class="card">
+        <h3>Selected Player</h3>
+        <div id="playerInfo"></div>
+      </section>
+
+      <section class="card">
+        <h3>Turn Events</h3>
+        <ul id="eventList"></ul>
+      </section>
+
+      <section class="card">
+        <h3>Turn History</h3>
+        <ul id="historyList"></ul>
+      </section>
+
+      <section class="card">
+        <h3>Save / Load</h3>
+        <div class="row wrap">
+          <button id="btnSave" class="btn-sm">Save</button>
+          <button id="btnLoad" class="btn-sm">Load</button>
+          <button id="btnExport" class="btn-sm">Export JSON</button>
+          <button id="btnImport" class="btn-sm">Import JSON</button>
+          <input type="file" id="importFile" accept=".json,application/json" hidden>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="tooltip"></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
