@@ -15,6 +15,7 @@ import { attackDir, goalAttackedBy, teamPlayers, getPlayer } from './team.js';
 import { recordEvent, kickoff, isMatchOver } from './state.js';
 import { analyze } from './tacticalAnalyzer.js';
 import { generateAdvice } from './aiAssistant.js';
+import { epvGain, epvValue } from './pitchControl.js';
 
 // ---------- เริ่ม / จบ เทิร์น ----------
 
@@ -567,10 +568,14 @@ function carryTarget(state, carrier, space) {
   let ty = carrier.y;
   if (objective === 'progressLeft' || objective === 'attackHalfSpaceLeft') ty -= 4;
   if (objective === 'progressRight' || objective === 'attackHalfSpaceRight') ty += 4;
-  return {
+  // เลือกทิศที่เพิ่มมูลค่าตำแหน่ง (EPV) มากที่สุดจาก 3 ตัวเลือก: ตรง/เฉียงใน/เฉียงออก
+  const cands = [ty, carrier.y + 5, carrier.y - 5].map((y) => ({
     x: clamp(carrier.x + dir * run, 1, PITCH.length - 1),
-    y: clamp(ty, 1, PITCH.width - 1),
-  };
+    y: clamp(y, 1, PITCH.width - 1),
+  }));
+  cands.sort((a, b) =>
+    epvValue(b.x, b.y, carrier.team) - epvValue(a.x, a.y, carrier.team));
+  return cands[0];
 }
 
 function switchOption(state, carrier) {
@@ -724,11 +729,15 @@ export function passOptions(state, owner, pressure = 0) {
     const ideal = team.passingStyle === 'short' ? 12 : team.passingStyle === 'direct' ? 24 : 17;
     const distFit = clamp(1 - Math.abs(d - ideal) / 26, 0, 1);
 
+    // EPV: การจ่ายที่ดีคือจ่ายไปยังตำแหน่งที่ "มีมูลค่า" มากขึ้น ไม่ใช่แค่ไปข้างหน้า
+    const valueGain = epvGain(owner.x, owner.y, aimX, aimY, owner.team);
+
     let score =
       laneSafety * 0.4 +
       space * 0.2 +
-      forward * 0.2 * (1 + (team.riskLevel - 3) * 0.12) +
-      distFit * 0.14;
+      forward * 0.12 * (1 + (team.riskLevel - 3) * 0.12) +
+      distFit * 0.14 +
+      clamp(valueGain * 1.4, -0.12, 0.28);
 
     // objective fit: จ่ายไปฝั่ง/พื้นที่ที่ทีมต้องการ
     if (objective === 'progressLeft' && mate.y < owner.y - 3) score += 0.08;

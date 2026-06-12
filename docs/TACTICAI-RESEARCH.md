@@ -104,9 +104,85 @@ core loop ของเกมเราพอดี
 - เริ่มจากสถานการณ์ปิด (corner) ก่อนแล้วค่อยขยายเป็น open play —
   ยืนยันแนวทาง MVP → P2 → P3 ของเรา
 
+## Part 2: งานวิจัยที่ TacticAI ต่อยอดมา (ศึกษาเพิ่มเติม)
+
+### 2.1 Game Plan: What AI can do for Football (DeepMind + Liverpool, JAIR 2021)
+
+เปเปอร์วิสัยทัศน์ที่นำมาสู่ TacticAI — วาง "AI ฟุตบอล" เป็น 3 ชั้นซ้อนกัน:
+
+1. **Predictive** — ทำนายสิ่งที่จะเกิด (ผู้รับบอล, การยิง, วิถีการวิ่ง)
+2. **Generative** — สร้างสถานการณ์ทางเลือก / **counterfactual**
+   ("ถ้าตอนนั้นกองหลังยืนอีกแบบ ผลจะเป็นอย่างไร")
+3. **Prescriptive** — แนะนำว่าควรทำอะไร (จุดที่ AI ฟุตบอลมีค่าที่สุดกับโค้ช)
+
+→ **เกมเราเดินครบทั้ง 3 ชั้นแล้ว**: Preview 8s (predictive), corner sandbox +
+preview ซ้ำหลังแก้แผน (generative/counterfactual), Adjust + AI Assistant (prescriptive)
+
+นอกจากนี้เปเปอร์ยังวิเคราะห์จุดโทษด้วย **game theory** (penalty = เกม
+ผู้รักษาประตู-คนยิงแบบ mixed strategy) → ไอเดียต่อยอด: penalty mini-game
+
+### 2.2 Pitch Control (Spearman) — *implement แล้วในรอบนี้*
+
+โมเดลพื้นฐานที่วงการ analytics ใช้ก่อนยุค GNN: ความน่าจะเป็นที่ทีมจะคุมบอล
+ณ จุดใดจุดหนึ่ง = ฟังก์ชันของ "เวลาที่ผู้เล่นที่เร็วที่สุดของแต่ละทีมไปถึงจุดนั้น"
+(ระยะ ÷ ความเร็ว + เวลาตอบสนอง ผ่าน sigmoid) — Graph Imputer ของ DeepMind
+ก็ใช้ pitch control เป็น downstream task
+
+→ ในเกม: `src/pitchControl.js` คำนวณ grid 28×18 จาก speed×stamina จริงของ
+นักเตะ แสดงเป็น heatmap (ปุ่ม 🗺 Space Control) + ตัวเลข "คุมพื้นที่กลางสนาม/
+final third" บน dashboard
+
+### 2.3 EPV / Expected Threat (xT) — *implement แล้วในรอบนี้*
+
+มูลค่าของการครองบอล ณ ตำแหน่งหนึ่ง = โอกาสที่ possession นี้จะจบด้วยประตู
+การกระทำที่ดีไม่ใช่ "ไปข้างหน้า" แต่คือ "ย้ายบอลไปยังตำแหน่งที่มูลค่าสูงขึ้น"
+(Fernández & Bornn แยก EPV เป็นองค์ประกอบ pass / carry / shot)
+
+→ ในเกม: `epvValue(x,y)` พื้นผิวมูลค่าแบบ closed-form (สูงสุดกลางหน้ากรอบ)
+ถูกถักเข้าไปในคะแนนการจ่าย (`valueGain`) และทิศทางการ carry — ผู้ถือบอล
+ตอนนี้เลือกเส้นทางที่ "เพิ่มมูลค่า" ไม่ใช่แค่เดินหน้า
+
+### 2.4 Data-Driven Ghosting (Le, Carr, Yue, Lucey — Sloan 2017)
+
+ระบบ "ghost" ที่เรียนจาก tracking data ว่า *กองหลังลีกเฉลี่ย/ทีมชั้นนำ
+จะยืนตรงไหนในสถานการณ์นี้* แล้ววาดเทียบกับตำแหน่งจริง → ตอบคำถาม
+"ผู้เล่นคนนี้ควรเล่นอย่างไรเมื่อเทียบกับมาตรฐาน" — ปุ่ม **Adjust ของเราคือ
+prescriptive ghosting เวอร์ชัน heuristic แล้ว** ต่อยอดได้: หลังจบเทิร์น
+วาด ghost "ตำแหน่งที่ควรยืน" เทียบกับที่ยืนจริงของกองหลังที่พลาด
+
+### 2.5 Graph Imputer / Multiagent off-screen prediction (Sci. Reports 2022)
+
+ทำนายตำแหน่งผู้เล่นที่ "หลุดจากกล้อง broadcast" ด้วย graph network + VAE —
+สำคัญเพราะทำให้ TacticAI เวอร์ชัน Palmeiras ใช้แค่ภาพถ่ายทอดสดได้
+
+→ ไอเดียเกมที่เจ๋งมาก: **Fog-of-War / Scouting mode** — โค้ชเห็นเฉพาะโซน
+ที่ scout มองอยู่ ตำแหน่งคู่แข่งนอกสายตาแสดงเป็น "การคาดการณ์" (วงเบลอ)
+ที่อัปเดตเมื่อเห็นจริง → เพิ่มมิติการอ่านเกมโดยไม่ต้องใช้ ML
+
+### 2.6 Backlog ใหม่จาก Part 2 (เรียงตามคุ้มค่า)
+
+1. ~~Pitch control map + EPV ในการตัดสินใจ~~ — **เสร็จแล้ว**
+2. **Ghost defender replay** — หลังเทิร์นที่โดนเจาะ วาดตำแหน่ง "ที่ควรยืน"
+   ของกองหลังเทียบกับที่ยืนจริง (ghosting แบบ 2.4)
+3. **Counterfactual เทิร์นที่แล้ว** — โหลด snapshot ต้นเทิร์นจาก history
+   มาเป็น sandbox ชั่วคราว ลองยืนใหม่ + Preview โดยไม่กระทบแมตช์จริง
+4. **Fog-of-War scouting mode** (2.5) — โหมดความยากสูง
+5. **Penalty mini-game แบบ game theory** (2.1) — เลือกมุมยิง/พุ่งแบบ
+   mixed strategy เมื่อเกิดจุดโทษ
+6. **ใช้ replay dataset ฝึก receiver model จริง** — logistic regression
+   เล็ก ๆ ใน JS จาก Export Dataset แทน softmax heuristic
+
 ## 6. แหล่งอ้างอิง
 
 - เปเปอร์: [TacticAI: an AI assistant for football tactics — Nature Communications](https://www.nature.com/articles/s41467-024-45965-x) ([arXiv](https://arxiv.org/abs/2310.10553))
 - บล็อก DeepMind: [TacticAI: AI assistant for football tactics](https://deepmind.google/discover/blog/tacticai-ai-assistant-for-football-tactics/)
 - ข่าว Palmeiras: [TNW — TacticAI can predict football plays 8 seconds before they happen](https://thenextweb.com/news/google-deepmind-tacticai-football-palmeiras-predict-plays)
 - บริบทเพิ่มเติม: [MIT Technology Review](https://www.technologyreview.com/2024/03/19/1089927/google-deepminds-new-ai-assistant-helps-elite-soccer-coaches-get-even-better/)
+
+แหล่งอ้างอิง Part 2:
+
+- [Game Plan: What AI can do for Football, and What Football can do for AI (JAIR 2021)](https://arxiv.org/pdf/2011.09192)
+- [Multiagent off-screen behavior prediction in football — Scientific Reports 2022 (Graph Imputer)](https://www.nature.com/articles/s41598-022-12547-0)
+- [Data-Driven Ghosting using Deep Imitation Learning — Le, Carr, Yue, Lucey (Sloan 2017)](https://la.disneyresearch.com/wp-content/uploads/Data-Driven-Ghosting-using-Deep-Imitation-Learning-Paper1.pdf)
+- [A framework for the fine-grained evaluation of the instantaneous expected value of soccer possessions (EPV — Fernández, Bornn, Cervone)](https://pmc.ncbi.nlm.nih.gov/articles/PMC8570314/)
+- [LaurieOnTracking — โค้ดตัวอย่าง pitch control ของ Spearman (Friends of Tracking)](https://github.com/Friends-of-Tracking-Data-FoTD/LaurieOnTracking)
