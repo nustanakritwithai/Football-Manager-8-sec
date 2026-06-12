@@ -6,6 +6,7 @@ import { toPx, toPy, drawPlayerPath, movementRadius } from './player.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { passOptions } from './simulation.js';
 import { shotProbability } from './tacticalAnalyzer.js';
+import { computePitchControl, controlShare, CONTROL_GRID } from './pitchControl.js';
 import { FORMATION_NAMES } from './formations.js';
 
 const SCORE_DEFS = [
@@ -26,7 +27,7 @@ export function initUI(state, handlers) {
     'clock', 'turn', 'phase', 'scoreline', 'awayStyle', 'teamPhase',
     'btnPlay', 'btnReset', 'btnSave', 'btnLoad', 'btnExport', 'btnImport', 'btnClearPaths',
     'btnPreview', 'btnAdjust', 'btnApplyGhosts', 'btnCorner', 'btnExportDataset',
-    'previewSummary', 'xgRow',
+    'btnSpaceMap', 'previewSummary', 'xgRow', 'spaceShare',
     'importFile', 'simSpeed', 'formation', 'scoreBars', 'assistantBox', 'eventList',
     'playerInfo', 'tooltip', 'statusMsg', 'historyList',
     'pressingLevel', 'defensiveLine', 'attackingWidth', 'passingStyle', 'tempo', 'riskLevel',
@@ -100,6 +101,12 @@ export function initUI(state, handlers) {
   els.btnCorner.addEventListener('click', handlers.onCorner);
   els.btnExportDataset.addEventListener('click', handlers.onExportDataset);
 
+  // P4: pitch control map toggle
+  els.btnSpaceMap.addEventListener('click', () => {
+    state.ui.showControl = !state.ui.showControl;
+    els.btnSpaceMap.classList.toggle('active', state.ui.showControl);
+  });
+
   // xG bars
   for (const side of ['home', 'away']) {
     const row = document.createElement('div');
@@ -161,6 +168,14 @@ export function updateDashboard(state) {
       bar.style.background = side === 'home' ? '#3ecf6e' : '#e0473d';
     }
     if (val) val.textContent = `${v}%`;
+  }
+
+  // P4: ส่วนแบ่งการคุมพื้นที่ (pitch control share)
+  const ctrl = getControlCached(state);
+  const mid = Math.round(controlShare(ctrl, 'middle') * 100);
+  const fin = Math.round(controlShare(ctrl, 'finalThird') * 100);
+  if (els.spaceShare) {
+    els.spaceShare.textContent = `คุมพื้นที่ — กลางสนาม ${mid}% · final third ${fin}%`;
   }
 
   // score bars
@@ -241,7 +256,20 @@ function updatePlayerInfo(state) {
 
 // ---------- overlays บนสนาม ----------
 
+// pitch control cache: คำนวณใหม่ทุก ~0.3 วินาทีพอ (22 คน × 504 เซลล์)
+let controlCache = null;
+let controlCacheAt = 0;
+function getControlCached(state) {
+  const now = performance.now();
+  if (!controlCache || now - controlCacheAt > 300) {
+    controlCache = computePitchControl(state);
+    controlCacheAt = now;
+  }
+  return controlCache;
+}
+
 export function drawOverlays(ctx, state) {
+  drawControlMap(ctx, state);
   drawDangerZones(ctx, state);
   drawCongestion(ctx, state);
   drawPreview(ctx, state);
@@ -252,6 +280,26 @@ export function drawOverlays(ctx, state) {
   drawRunArrows(ctx, state);
   drawCarrierAction(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P4: Pitch Control Map — ใครคุมพื้นที่ตรงไหน (น้ำเงิน = เรา, แดง = คู่แข่ง)
+function drawControlMap(ctx, state) {
+  if (!state.ui.showControl) return;
+  const ctrl = getControlCached(state);
+  const { cols, rows } = CONTROL_GRID;
+  const cw = (PITCH.length / cols) * SCALE;
+  const ch = (PITCH.width / rows) * SCALE;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = ctrl[r * cols + c]; // 1 = เราคุม, 0 = คู่แข่งคุม
+      const strength = Math.abs(v - 0.5) * 2; // 0 = สูสี
+      if (strength < 0.15) continue;
+      ctx.fillStyle = v > 0.5
+        ? `rgba(47,111,237,${0.06 + strength * 0.16})`
+        : `rgba(224,71,61,${0.06 + strength * 0.14})`;
+      ctx.fillRect(toPx(0) + c * cw, toPy(0) + r * ch, cw + 0.5, ch + 0.5);
+    }
+  }
 }
 
 // P3: Preview Next 8 Seconds — ghost trails ของอนาคตที่จำลองไว้
