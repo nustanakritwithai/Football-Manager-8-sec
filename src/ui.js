@@ -318,7 +318,13 @@ function drawPassingLanes(ctx, state) {
   const owner = state.ball.ownerPlayerId ? getPlayer(state, state.ball.ownerPlayerId) : null;
   if (!owner || owner.team !== 'home') return;
   const opts = passOptions(state, owner).slice(0, 4);
-  for (const o of opts) {
+  if (!opts.length) return;
+
+  // แปลงคะแนนเป็นความน่าจะเป็นผู้รับบอลคนต่อไป (softmax) แบบ TacticAI receiver %
+  const exps = opts.map((o) => Math.exp(o.score * 4));
+  const sum = exps.reduce((s, v) => s + v, 0);
+
+  opts.forEach((o, i) => {
     ctx.beginPath();
     ctx.moveTo(toPx(owner.x), toPy(owner.y));
     ctx.lineTo(toPx(o.mate.x), toPy(o.mate.y));
@@ -327,7 +333,16 @@ function drawPassingLanes(ctx, state) {
     ctx.setLineDash([6, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
-  }
+
+    // % ผู้รับ 3 อันดับแรก
+    if (i < 3) {
+      const pct = Math.round((exps[i] / sum) * 100);
+      ctx.fillStyle = 'rgba(140,240,210,0.95)';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${pct}%`, toPx(o.mate.x), toPy(o.mate.y) - 14);
+    }
+  });
 }
 
 function drawPressureCircle(ctx, state) {
