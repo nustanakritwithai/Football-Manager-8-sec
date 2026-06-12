@@ -89,6 +89,8 @@ export function applySave(state, data) {
   state.teamPhases = { home: 'BUILD_UP', away: 'DEFENDING' };
   state.teamObjectives = { home: 'buildUp', away: 'midBlock' };
   state.lastTurnStats = { passes: 0, carries: 0, dribbles: 0, runs: 0 };
+  state.replayLog = [];
+  state.ui.preview = null;
 
   Object.assign(state.ball, data.ball);
   state.tacticalScores = data.tacticalScores || null;
@@ -138,6 +140,28 @@ export function exportJSON(state) {
   a.download = `tactic-lab-turn${state.turn}.json`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// P3: export replay dataset (ข้อมูลต่อเทิร์น) สำหรับวิเคราะห์/ฝึกโมเดลภายหลัง
+export function exportDataset(state) {
+  const data = {
+    version: SAVE_VERSION,
+    exportedAt: new Date().toISOString(),
+    match: {
+      homeFormation: state.teams.home.formation,
+      awayStyle: state.teams.away.strategy,
+      score: { ...state.score },
+    },
+    turns: state.replayLog ?? [],
+  };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tactic-lab-dataset-${(state.replayLog ?? []).length}turns.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  return (state.replayLog ?? []).length;
 }
 
 export function importJSON(state, file, callback) {

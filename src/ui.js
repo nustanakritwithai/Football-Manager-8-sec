@@ -5,6 +5,7 @@ import { clamp, distP, formatClock } from './utils.js';
 import { toPx, toPy, drawPlayerPath, movementRadius } from './player.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { passOptions } from './simulation.js';
+import { shotProbability } from './tacticalAnalyzer.js';
 import { FORMATION_NAMES } from './formations.js';
 
 const SCORE_DEFS = [
@@ -24,6 +25,8 @@ export function initUI(state, handlers) {
   const ids = [
     'clock', 'turn', 'phase', 'scoreline', 'awayStyle', 'teamPhase',
     'btnPlay', 'btnReset', 'btnSave', 'btnLoad', 'btnExport', 'btnImport', 'btnClearPaths',
+    'btnPreview', 'btnAdjust', 'btnApplyGhosts', 'btnCorner', 'btnExportDataset',
+    'previewSummary', 'xgRow',
     'importFile', 'simSpeed', 'formation', 'scoreBars', 'assistantBox', 'eventList',
     'playerInfo', 'tooltip', 'statusMsg', 'historyList',
     'pressingLevel', 'defensiveLine', 'attackingWidth', 'passingStyle', 'tempo', 'riskLevel',
@@ -89,6 +92,28 @@ export function initUI(state, handlers) {
     if (file) handlers.onImport(file);
     els.importFile.value = '';
   });
+
+  // P3: TacticAI tools
+  els.btnPreview.addEventListener('click', handlers.onPreview);
+  els.btnAdjust.addEventListener('click', handlers.onAdjust);
+  els.btnApplyGhosts.addEventListener('click', handlers.onApplyGhosts);
+  els.btnCorner.addEventListener('click', handlers.onCorner);
+  els.btnExportDataset.addEventListener('click', handlers.onExportDataset);
+
+  // xG bars
+  for (const side of ['home', 'away']) {
+    const row = document.createElement('div');
+    row.className = 'score-row';
+    row.innerHTML = `
+      <span class="score-label">${side === 'home' ? 'โอกาสยิงใน 8 วิ — เรา' : 'โอกาสยิงใน 8 วิ — คู่แข่ง'}</span>
+      <div class="score-bar"><div class="score-fill" id="xg-${side}"></div></div>
+      <span class="score-val" id="xgv-${side}">–</span>`;
+    els.xgRow.appendChild(row);
+  }
+}
+
+export function setPreviewSummary(text) {
+  if (els.previewSummary) els.previewSummary.textContent = text || '';
 }
 
 export function setStatus(text, isError = false) {
@@ -119,8 +144,23 @@ export function updateDashboard(state) {
   els.btnPlay.textContent = state.phase === 'finished'
     ? 'จบแมตช์แล้ว'
     : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…` : `▶ Play Next ${TURN_SECONDS} Seconds`;
-  for (const b of [els.btnReset, els.btnSave, els.btnLoad, els.btnExport, els.btnImport, els.formation]) {
+  for (const b of [
+    els.btnReset, els.btnSave, els.btnLoad, els.btnExport, els.btnImport, els.formation,
+    els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner,
+  ]) {
     b.disabled = busy;
+  }
+
+  // xG / shot probability
+  for (const side of ['home', 'away']) {
+    const v = Math.round(shotProbability(state, side) * 100);
+    const bar = document.getElementById(`xg-${side}`);
+    const val = document.getElementById(`xgv-${side}`);
+    if (bar) {
+      bar.style.width = `${v}%`;
+      bar.style.background = side === 'home' ? '#3ecf6e' : '#e0473d';
+    }
+    if (val) val.textContent = `${v}%`;
   }
 
   // score bars
@@ -204,6 +244,7 @@ function updatePlayerInfo(state) {
 export function drawOverlays(ctx, state) {
   drawDangerZones(ctx, state);
   drawCongestion(ctx, state);
+  drawPreview(ctx, state);
   for (const p of state.players) drawPlayerPath(ctx, p);
   drawPassingLanes(ctx, state);
   drawPressureCircle(ctx, state);
@@ -211,6 +252,54 @@ export function drawOverlays(ctx, state) {
   drawRunArrows(ctx, state);
   drawCarrierAction(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P3: Preview Next 8 Seconds — ghost trails ของอนาคตที่จำลองไว้
+function drawPreview(ctx, state) {
+  const pv = state.ui.preview;
+  if (!pv || state.phase !== 'planning') return;
+
+  for (const path of pv.paths) {
+    if (path.points.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(toPx(path.points[0].x), toPy(path.points[0].y));
+    for (let i = 1; i < path.points.length; i++) {
+      ctx.lineTo(toPx(path.points[i].x), toPy(path.points[i].y));
+    }
+    ctx.strokeStyle = path.team === 'home' ? 'rgba(110,160,255,0.28)' : 'rgba(255,130,120,0.22)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // ตำแหน่งสุดท้ายเป็น ghost จาง
+    ctx.beginPath();
+    ctx.arc(toPx(path.end.x), toPy(path.end.y), 7, 0, Math.PI * 2);
+    ctx.fillStyle = path.team === 'home' ? 'rgba(47,111,237,0.3)' : 'rgba(224,71,61,0.25)';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(path.number), toPx(path.end.x), toPy(path.end.y));
+  }
+
+  // เส้นทางลูกบอลที่คาดการณ์
+  if (pv.ballPath.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(toPx(pv.ballPath[0].x), toPy(pv.ballPath[0].y));
+    for (let i = 1; i < pv.ballPath.length; i++) {
+      ctx.lineTo(toPx(pv.ballPath[i].x), toPy(pv.ballPath[i].y));
+    }
+    ctx.strokeStyle = 'rgba(242,201,76,0.55)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([2, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.fillStyle = 'rgba(242,201,76,0.85)';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('PREVIEW — อนาคต 8 วินาที (หนึ่งในความเป็นไปได้)', toPx(2), toPy(-1.2));
 }
 
 // P2: วง movement radius + เส้นคำสั่งไปยัง intended target

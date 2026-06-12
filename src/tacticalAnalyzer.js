@@ -32,7 +32,85 @@ export function analyze(state) {
   detectRoleZoneViolation(state, home, flags);
   detectOverPassing(state, flags);
 
+  // P3: similar situation retrieval (เทียบทั้งภาพปกติและภาพกระจก D2)
+  flags.similarTurn = findSimilarPastTurn(state);
+
   return { scores, flags };
+}
+
+// ---------- P3: Shot probability (xG เบื้องต้น แบบ TacticAI) ----------
+// P(shot) = P(ยิงเอง) + Σ P(ผู้รับ=i) · P(ยิง|ผู้รับ=i)
+
+export function shotProbability(state, teamId) {
+  const players = teamPlayers(state, teamId);
+  const owner = state.ball.ownerPlayerId ? getPlayer(state, state.ball.ownerPlayerId) : null;
+
+  if (!owner || owner.team !== teamId) {
+    // ไม่มีบอล: โอกาสเกิดการยิงต่ำ ขึ้นกับจำนวนตัวรุกใน final third
+    const dir = teamId === 'home' ? 1 : -1;
+    const inFinal = players.filter((p) => (dir === 1 ? p.x > 70 : p.x < 35)).length;
+    return clamp(0.01 + inFinal * 0.008, 0, 0.08);
+  }
+
+  const pSelf = shotChanceOf(state, owner);
+  const opts = passOptions(state, owner).slice(0, 4);
+  let pViaPass = 0;
+  if (opts.length) {
+    const exps = opts.map((o) => Math.exp(o.score * 4));
+    const sum = exps.reduce((s, v) => s + v, 0);
+    opts.forEach((o, i) => {
+      pViaPass += (exps[i] / sum) * shotChanceOf(state, o.mate);
+    });
+  }
+  return clamp(pSelf * 0.6 + pViaPass * 0.45, 0, 0.95);
+}
+
+// โอกาสที่นักเตะคนนี้จะได้ยิงภายในจังหวะถัดไป ถ้ามีบอล
+function shotChanceOf(state, p) {
+  const goal = { x: p.team === 'home' ? PITCH.length : 0, y: 34 };
+  const d = distP(p, goal);
+  if (d > 38) return 0;
+  const angleFactor = clamp(1 - Math.abs(p.y - 34) / 24, 0.1, 1);
+  let pressure = 0;
+  for (const o of state.players) {
+    if (o.team === p.team) continue;
+    const od = distP(o, p);
+    if (od < 7) pressure += Math.max(0, 1 - od / 7);
+  }
+  return clamp((1 - d / 40) * angleFactor * (0.5 + p.shooting / 200) / (1 + pressure * 0.7), 0, 0.9);
+}
+
+// ---------- P3: similar situation retrieval ----------
+// เทียบ snapshot ปัจจุบันกับจุดเริ่มของเทิร์นในอดีต (รวม mirror แกน y แบบ D2)
+
+export function findSimilarPastTurn(state) {
+  if (state.history.length < 2) return null;
+  const cur = new Map(state.players.map((p) => [p.id, p]));
+  let best = null;
+
+  for (const h of state.history.slice(0, -1)) {
+    if (!Array.isArray(h.startingPositions)) continue;
+    for (const mirrored of [false, true]) {
+      let total = 0, n = 0;
+      for (const sp of h.startingPositions) {
+        const p = cur.get(sp.id);
+        if (!p) continue;
+        const sy = mirrored ? PITCH.width - sp.y : sp.y;
+        total += Math.hypot(p.x - sp.x, p.y - sy);
+        n++;
+      }
+      if (!n) continue;
+      const avg = total / n;
+      if (avg < 7.5 && (!best || avg < best.avgDist)) {
+        const danger = (h.events || []).some(
+          (e) => e.startsWith('GOAL') || (e.includes('Shot chance') && e.includes('Their'))
+            || e.includes('Counter risk: we lost')
+        );
+        best = { turnNumber: h.turnNumber, avgDist: +avg.toFixed(1), mirrored, danger };
+      }
+    }
+  }
+  return best;
 }
 
 // ---------- P2 detections ----------

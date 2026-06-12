@@ -135,4 +135,28 @@ save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อ
 - **AI Assistant ใหม่** — เตือน clustering, เสีย width, ผู้ถือบอลโดดเดี่ยว,
   ส่งบอลวนไม่ progress, ไม่มี off-ball run, CB/DM หลุดโซน
 
+## P3: TacticAI Tools
+
+ฟีเจอร์ชุดใหม่ตามแนวคิด [TacticAI ของ Google DeepMind](docs/TACTICAI-RESEARCH.md)
+(ระบบที่ทำนายเกมล่วงหน้า 8 วินาทีให้ Palmeiras):
+
+- **👁 Preview 8s** — "เห็นอนาคตก่อนกด Play": จำลอง 8 วินาทีข้างหน้าบนสำเนา state
+  แล้ววาดเป็น ghost trails จาง ๆ พร้อมสรุป (บอลจบที่ใคร / มีโอกาสยิงไหม)
+  ลากนักเตะแก้แผนแล้วกด Preview ใหม่ได้เรื่อย ๆ — state จริงไม่ถูกแตะ
+- **Receiver %** — passing lanes แสดงความน่าจะเป็นผู้รับบอลคนต่อไป (top 3)
+  แบบเดียวกับ UI ของ TacticAI
+- **โอกาสยิงใน 8 วิ (xG)** — P(shot) ของทั้งสองทีม คิดแบบเปเปอร์:
+  Σ P(ผู้รับ=i) · P(ยิง|ผู้รับ=i) แสดงเป็น bar ใต้ tactical scores
+- **🛡 Adjust (AI จัดรับ)** — guided refinement: hill-climbing ตำแหน่งนักเตะรับ
+  ภายใน movement radius เพื่อลดโอกาสยิงคู่แข่ง + counter risk แล้วเสนอเป็น ghost
+  (เทียบเท่า generative refinement ของ TacticAI แต่ใช้ optimizer บน heuristic)
+- **✅ ใช้คำแนะนำ AI** — แปลง ghost ทั้งหมดเป็นคำสั่งวิ่งจริงในคลิกเดียว
+- **⚽ ซ้อมเตะมุม** — จัดสถานการณ์ corner ทั้งสองทีม (คนเตะ, ตัวโจมตีในกรอบ,
+  คนคุม second ball, แนวกันสวน vs แนวรับ zonal + เสา) ตามรอยที่ TacticAI
+  เริ่มพิสูจน์ตัวเองกับลูกเตะมุมก่อน
+- **Similar situation retrieval** — เทียบรูปเกมปัจจุบันกับจุดเริ่มของเทิร์นในอดีต
+  (รวมภาพกระจกซ้าย-ขวาแบบ D2 symmetry) ถ้าเคยโดนเจาะในรูปเกมเดียวกัน AI จะเตือน
+- **Export Dataset** — บันทึกข้อมูลต่อเทิร์น (positions เริ่ม/จบ, objective, stats,
+  shots, scores) สูงสุด 200 เทิร์น สำหรับวิเคราะห์หรือฝึกโมเดลเบา ๆ ภายหลัง
+
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime
