@@ -140,6 +140,16 @@ function finishSimulation(state) {
   if (!sim.endedByRestart) state.playState = 'live';
   state.lastTurnStats = { ...sim.stats.home };
 
+  // P2.8/fix: ติดตามการครองบอลยืดเยื้อ — ถ้าทีมเดิมครองต่อเนื่องโดยไม่มีการยิง = stall
+  // ใช้เร่ง pressing ของอีกฝ่ายให้แย่งบอลคืน กัน "ติด DEFENDING/midBlock วนไม่จบ"
+  {
+    const poss = state.possessionTeam;
+    const hadShot = (sim.stats.home.shots + sim.stats.away.shots) > 0;
+    const prev = state.possessionStreak;
+    if (!prev || prev.team !== poss || hadShot) state.possessionStreak = { team: poss, turns: 1 };
+    else state.possessionStreak = { team: poss, turns: prev.turns + 1 };
+  }
+
   const analysis = analyze(state);
   state.tacticalScores = analysis.scores;
   const advice = generateAdvice(state, analysis, state.lastTurnEvents, state.prevScores);
@@ -1083,6 +1093,11 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const inAttThird = dir === 1 ? carrier.x > 70 : carrier.x < 35;
   const acts = [];
 
+  // fix: ครองบอลยืดเยื้อหลายเทิร์นโดยไม่คืบ → เร่งให้ "ลองของ" (carry/จ่ายหน้า) แทนการพักบอล
+  // กันเกมติดวน DEFENDING/midBlock เพราะอีกฝ่ายเก็บบอลนิ่ง ๆ
+  const streak = state.possessionStreak;
+  const stale = (streak && streak.team === carrier.team) ? clamp(streak.turns - 2, 0, 5) : 0;
+
   // --- SHOOT (P2.6: finishing instinct + zone logic) ---
   const shot = evaluateShotAction(state, carrier, pressure);
 
@@ -1147,7 +1162,7 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const space = openSpaceAhead(state, carrier);
   if (pressure < 1.1 && space > CARRY_SPACE_THRESHOLD) {
     const ability = carryAbility(carrier);
-    let s = 0.32 + clamp(space / 28, 0, 0.32) + ability * 0.22 - pressure * 0.2;
+    let s = 0.32 + clamp(space / 28, 0, 0.32) + ability * 0.22 - pressure * 0.2 + stale * 0.08;
     if (objective.startsWith('progress') || objective === 'counterAttack' || objective.startsWith('attackHalfSpace')) s += 0.12;
     if (objective === 'holdPossession') s -= 0.1;
     if (carrier.role === 'CB' && phase === 'BUILD_UP') s -= 0.08; // CB carry ได้แต่ระวัง
@@ -1186,6 +1201,7 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   if (inAttThird) holdScore -= 0.12;
   if (shot?.zone === 'must') holdScore -= 0.2;
   if (dGoal < 25 && pressure > 0.8) holdScore -= 0.15;
+  holdScore -= stale * 0.12; // ครองนานเกินไปอย่าพักบอลอีก
   acts.push({ type: 'hold', score: holdScore });
 
   // --- CLEAR: เคลียร์เมื่อเสี่ยงหน้ากรอบตัวเอง ---
@@ -2271,8 +2287,19 @@ function defendingOffBall(state, p, owner, phase) {
     let nPress = team.pressingLevel >= 4 ? 3 : team.pressingLevel >= 2 ? 2 : 1;
     let pressRadius = 10 + team.pressingLevel * 4;
     if (counterPress) { nPress += 1; pressRadius += 5; }
+    // fix: คู่แข่งครองบอลยืดเยื้อหลายเทิร์น (stall) → เร่ง pressing แย่งคืน กัน "ติด midBlock วนไม่จบ"
+    const streak = state.possessionStreak;
+    let stale = 0;
+    if (streak && streak.team === oppOwner.team && streak.turns >= 3) {
+      stale = Math.min(streak.turns - 2, 5); // 1..5
+      nPress += stale >= 1 ? 1 : 0;
+      nPress += stale >= 3 ? 1 : 0;
+      pressRadius += stale * 5;
+    }
     const idx = pressers.indexOf(p);
-    if (idx >= 0 && idx < nPress && distP(p, oppOwner) < pressRadius && p.stamina > 18) {
+    // ครองนานมาก: ตัวที่ใกล้บอลสุดออกจาก block ไปไล่เลย แม้บอลจะอยู่ลึกในแดนคู่แข่ง
+    const forceChase = stale >= 3 && idx === 0;
+    if (idx >= 0 && idx < nPress && (forceChase || distP(p, oppOwner) < pressRadius) && p.stamina > 12) {
       return { x: oppOwner.x, y: oppOwner.y, urgency: 1, pressing: true };
     }
   }

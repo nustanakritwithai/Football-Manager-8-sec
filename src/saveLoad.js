@@ -37,6 +37,7 @@ export function serialize(state) {
     foulCount: state.foulCount ? { ...state.foulCount } : { home: 0, away: 0 },
     cards: state.cards ? { yellow: [...state.cards.yellow], red: [...state.cards.red] } : { yellow: [], red: [] },
     matchStats: state.matchStats ? { home: { ...state.matchStats.home }, away: { ...state.matchStats.away } } : null,
+    possessionStreak: state.possessionStreak ? { ...state.possessionStreak } : null,
     tacticalScores: state.tacticalScores ? { ...state.tacticalScores } : null,
     history: state.history.slice(-10),
     passModel: state.passModel ? { ...state.passModel } : null,
@@ -114,6 +115,7 @@ export function applySave(state, data) {
   state.cards = data.cards ?? { yellow: [], red: [] };
   const emptyMatchStats = () => ({ shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 });
   state.matchStats = data.matchStats ?? { home: emptyMatchStats(), away: emptyMatchStats() };
+  state.possessionStreak = data.possessionStreak ?? { team: state.possessionTeam, turns: 0 };
   state.structuredEvents = [];
   state.tacticalScores = data.tacticalScores || null;
   state.history = Array.isArray(data.history) ? data.history.slice(-10) : [];

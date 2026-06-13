@@ -20,6 +20,7 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     ball: createBall(),
     possessionTeam: 'home',
     // P2.8: match rules & restart state
+    possessionStreak: { team: 'home', turns: 0 }, // กี่เทิร์นติดที่ทีมเดิมครองบอลแบบไม่คืบ (กัน stuck DEFENDING)
     playState: 'live',     // live | deadBall | setPiece | goalCelebration | finished
     restart: null,         // { type, team, spot, side, reason, takerId, createdAtClock }
     structuredEvents: [],   // เหตุการณ์แบบ structured ของเทิร์นล่าสุด

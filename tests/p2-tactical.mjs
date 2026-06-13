@@ -94,6 +94,24 @@ function playTurn(state) {
   console.log(`  score ${state.score.home}-${state.score.away}`);
 }
 
+// ---- Test 8: stall-breaker — ไม่ติด DEFENDING/midBlock วนยาวเกินไป ----
+{
+  let worst = 0;
+  for (let m = 0; m < 25; m++) {
+    const s = createInitialState('4-2-3-1');
+    s.tacticalScores = analyze(s).scores;
+    let streak = 0;
+    while (s.phase !== 'finished') {
+      playTurn(s);
+      if (s.teamPhases.home === 'DEFENDING') { streak++; worst = Math.max(worst, streak); }
+      else streak = 0;
+    }
+  }
+  // ก่อนแก้: เคยติด DEFENDING ยาวถึง ~32 เทิร์น (เกือบทั้งแมตช์) — press escalation ต้องคุมไว้
+  assert(worst < 18, `ติด DEFENDING ต่อเนื่องนานเกินไป (${worst} เทิร์น) — stall-breaker ควรแย่งบอลคืน`);
+  console.log(`Test 8 OK — worst DEFENDING streak ${worst} เทิร์น (มี press escalation กัน stuck)`);
+}
+
 // ---- Test 7: save/load รวม legacy save (v1 ไม่มี field P2) ----
 {
   const state = createInitialState('4-2-3-1');
