@@ -146,7 +146,11 @@ export function setStatus(text, isError = false) {
 }
 
 export function updateDashboard(state) {
-  els.clock.textContent = formatClock(state.clock);
+  // นาฬิกาแมตช์ 0→90' + ป้ายครึ่ง/พักครึ่ง
+  const halfTag = state.playState === 'halftime' ? ' · HT'
+    : state.phase === 'finished' ? ' · FT'
+    : ` · ${state.half === 2 ? '2nd' : '1st'} half`;
+  els.clock.textContent = `${formatClock(state.clock)}${halfTag}`;
   els.turn.textContent = `เทิร์น ${Math.min(state.turn, MATCH_TURNS)}/${MATCH_TURNS}`;
   els.scoreline.textContent = `${state.teams.home.teamName} ${state.score.home} - ${state.score.away} ${state.teams.away.teamName}`;
   els.awayStyle.textContent = `คู่แข่ง: ${state.teams.away.strategy}`;
@@ -176,9 +180,11 @@ export function updateDashboard(state) {
   const pen = !!state.pendingPenalty;
   els.btnPlay.disabled = busy || pen || state.phase === 'finished';
   els.btnPlay.textContent = state.phase === 'finished'
-    ? 'จบแมตช์แล้ว'
+    ? 'จบแมตช์แล้ว (Full Time)'
     : pen ? 'รอตัดสินจุดโทษ…'
-    : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…` : `▶ Play Next ${TURN_SECONDS} Seconds`;
+    : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…`
+    : state.playState === 'halftime' ? '▶ เริ่มครึ่งหลัง (2nd Half)'
+    : `▶ Play Next ${TURN_SECONDS} Seconds`;
   for (const b of [
     els.btnReset, els.btnExport, els.btnImport, els.formation,
     els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner, els.btnWhatIf, els.btnTrain,
@@ -443,9 +449,9 @@ export function updateFog(state) {
   for (const p of state.players) {
     if (p.team !== 'away') continue;
     if (isOpponentVisible(state, p)) {
-      p.lastSeen = { x: p.x, y: p.y, clock: state.clock };
+      p.lastSeen = { x: p.x, y: p.y, turn: state.turn };
     } else if (!p.lastSeen) {
-      p.lastSeen = { x: p.x, y: p.y, clock: state.clock }; // เห็นครั้งแรกตอนเปิดโหมด
+      p.lastSeen = { x: p.x, y: p.y, turn: state.turn }; // เห็นครั้งแรกตอนเปิดโหมด
     }
   }
 }
@@ -455,7 +461,7 @@ function drawFogGhosts(ctx, state) {
   if (!state.ui.fogOfWar) return;
   for (const p of state.players) {
     if (p.team !== 'away' || isOpponentVisible(state, p) || !p.lastSeen) continue;
-    const turnsLost = Math.max(0, (state.clock - p.lastSeen.clock) / 8);
+    const turnsLost = Math.max(0, state.turn - (p.lastSeen.turn ?? state.turn));
     const uncertainty = Math.min(3 + turnsLost * 2.5, 12) * SCALE * 0.4;
     const px = toPx(p.lastSeen.x), py = toPy(p.lastSeen.y);
     ctx.beginPath();

@@ -99,10 +99,11 @@ function shotAt(x, y, shooting = 80) {
     big += s.matchStats.home.bigChances + s.matchStats.away.bigChances;
   }
   const per = (v) => (v / matches);
-  assert(per(goals) >= 0.8 && per(goals) <= 3.4, `goals/เกม ต้องอยู่ราว 0–3 (ได้ ${per(goals).toFixed(2)})`);
-  assert(per(shots) >= 6 && per(shots) <= 16, `shots/เกม 6–16 (ได้ ${per(shots).toFixed(1)})`);
-  assert(per(sot) >= 2 && per(sot) <= 7, `on-target/เกม 2–7 (ได้ ${per(sot).toFixed(1)})`);
-  assert(maxGoals <= 8, `ไม่ควรมีเกมสกอร์ล้นเกิน (max ${maxGoals})`);
+  // แมตช์เต็ม 90 นาที (80 เทิร์น): สถิติต่อเกมสมจริงระดับฟุตบอลจริง
+  assert(per(goals) >= 1.5 && per(goals) <= 6, `goals/เกม ต้องอยู่ราว 2–4 (ได้ ${per(goals).toFixed(2)})`);
+  assert(per(shots) >= 10 && per(shots) <= 30, `shots/เกม 10–30 (ได้ ${per(shots).toFixed(1)})`);
+  assert(per(sot) >= 3 && per(sot) <= 14, `on-target/เกม 3–14 (ได้ ${per(sot).toFixed(1)})`);
+  assert(maxGoals <= 13, `ไม่ควรมีเกมสกอร์ล้นเกิน (max ${maxGoals})`);
   console.log(`Balance OK — goals/g ${per(goals).toFixed(2)}, shots/g ${per(shots).toFixed(1)}, onTarget/g ${per(sot).toFixed(1)}, big/g ${per(big).toFixed(1)}, maxGoals ${maxGoals}`);
 }
 

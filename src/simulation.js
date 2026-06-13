@@ -4,7 +4,7 @@
 
 import {
   PITCH, TICKS_PER_TURN, TICK_DT, TURN_SECONDS,
-  PATH_SAMPLE_EVERY, MAX_HISTORY, MATCH_TURNS,
+  PATH_SAMPLE_EVERY, MAX_HISTORY, MATCH_TURNS, HALF_TURNS, MATCH_SECONDS, HALFTIME_STAMINA_BOOST,
   MIN_PLAYER_SPACING, SEPARATION_FORCE, CONGESTION_GRID, CONGESTION_LIMIT,
   CARRY_SPACE_THRESHOLD, DRIBBLE_PRESSURE_MAX, PASS_MEMORY_SIZE,
   PLAYER_TOUCH_RADIUS, PLAYER_BLOCK_RADIUS, BALL_REACH_HEIGHT, DEFLECTION_NOISE,
@@ -134,10 +134,10 @@ function finishSimulation(state) {
     p.commandLocked = false;
   }
 
-  // P2.8: clock เดินเฉพาะวินาทีที่เล่นจริง (เทิร์นที่หยุดเพราะบอลตายจะเดินไม่ครบ 8 วิ)
-  // เทิร์นที่เล่นจริงเดินอย่างน้อย 1 วินาทีเสมอ (กัน clock ค้างเมื่อบอลตายเร็วมาก)
-  const elapsed = sim.endedByRestart ? Math.max(1, Math.round(sim.tick * TICK_DT)) : TURN_SECONDS;
-  state.clock += elapsed;
+  // นาฬิกาแมตช์ 90 นาที: แต่ละเทิร์น (action 8 วิ) เดินนาฬิกาแมตช์ทีละก้อน
+  // เพื่อให้ครบ 0→45:00 (พักครึ่ง เทิร์น 40) และ →90:00 (จบ เทิร์น 80)
+  const turnStartClock = Math.round(((state.turn - 1) / MATCH_TURNS) * MATCH_SECONDS);
+  state.clock = Math.round((state.turn / MATCH_TURNS) * MATCH_SECONDS);
   if (!sim.endedByRestart) state.playState = 'live';
   state.lastTurnStats = { ...sim.stats.home };
 
@@ -170,7 +170,7 @@ function finishSimulation(state) {
 
   state.history.push({
     turnNumber: state.turn,
-    startClock: state.clock - TURN_SECONDS,
+    startClock: turnStartClock,
     endClock: state.clock,
     startingPositions: sim.startSnapshot,
     endingPositions: snapshotPositions(state),
@@ -211,9 +211,23 @@ function finishSimulation(state) {
   state.phase = isMatchOver(state) ? 'finished' : 'planning';
   state.ui.scoresDirty = true;
 
+  // พักครึ่ง: หลังจบเทิร์นที่ HALF_TURNS (40) → ครึ่งหลัง, ฟื้น stamina บางส่วน, คู่แข่งเขี่ยบอล
+  if (state.turn === HALF_TURNS + 1 && state.half === 1 && state.phase !== 'finished') {
+    state.half = 2;
+    for (const p of state.players) p.stamina = clamp(p.stamina + HALFTIME_STAMINA_BOOST, 0, 100);
+    state.restart = makeRestart('kickoff', 'away', { x: PITCH.length / 2, y: 34 }, null, 'secondHalf');
+    state.playState = 'halftime';
+    recordEvent(state, 'Half Time — second half kick-off to Away');
+    recordStructuredEvent(state, { type: 'HALF_TIME', team: 'away' });
+    state.assistant.messages.unshift({
+      severity: 'info',
+      text: 'พักครึ่ง (45\') — นักเตะฟื้น stamina บางส่วน ครึ่งหลังคู่แข่งเป็นฝ่ายเขี่ยบอล กด Play เพื่อเริ่มครึ่งหลัง',
+    });
+  }
+
   if (state.phase === 'finished') {
     state.assistant.messages.unshift({
-      text: `จบแมตช์! สกอร์ ${state.score.home}-${state.score.away} (${MATCH_TURNS} เทิร์น) — ครองบอลรวมฝั่งเรา ${possessionPercent(state)}%`,
+      text: `จบแมตช์ (Full Time)! สกอร์ ${state.score.home}-${state.score.away} — ครองบอลรวมฝั่งเรา ${possessionPercent(state)}%`,
       severity: 'info',
     });
   }

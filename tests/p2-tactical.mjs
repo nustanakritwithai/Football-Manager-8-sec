@@ -86,8 +86,9 @@ function playTurn(state) {
   assert(state.passMemory.recentPasses.length > 0, 'pass memory ไม่ถูกบันทึก');
   assert(phases.size >= 2, `team phase ไม่หลากหลาย: ${[...phases]}`);
   assert(state.history.length === 10, 'history ต้องเก็บ 10 เทิร์น');
-  // P2.8: clock เดินเฉพาะวินาทีที่บอล live (เทิร์นที่หยุดเพราะบอลตายเดินไม่ครบ 8 วิ)
-  assert(state.clock > 0 && state.clock <= MATCH_TURNS * 8, `clock ผิด (${state.clock})`);
+  // นาฬิกาแมตช์ 90 นาที: จบที่ 90:00 = 5400 วินาที พอดี
+  assert(state.clock === 90 * 60, `clock ต้องจบที่ 90:00 (ได้ ${state.clock})`);
+  assert(state.half === 2, 'ต้องเล่นถึงครึ่งหลัง');
   console.log(`Test 4+6 OK — passes ${totals.passes}, carries ${totals.carries}, dribbles ${totals.dribbles}, runs ${totals.runs}`);
   console.log(`  phases: ${[...phases].join(', ')}`);
   console.log(`  objectives: ${[...objectives].join(', ')}`);

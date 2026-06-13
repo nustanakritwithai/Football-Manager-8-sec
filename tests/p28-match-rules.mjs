@@ -128,9 +128,13 @@ const playTurn = (s) => { startSimulation(s); let n = 0; while (!simTick(s)) if 
       const c0 = s.clock;
       playTurn(s);
       const delta = s.clock - c0;
-      assert(delta >= 1 && delta <= 8, `clock เดินต่อเทิร์น 1<=delta<=8 (ได้ ${delta})`);
-      if (delta < 8) earlyStops++; // เทิร์นที่หยุดเพราะบอลตาย
-      for (const e of s.history.at(-1).events) {
+      // นาฬิกาแมตช์เดิน ~5400/80 ≈ 67.5 วินาที/เทิร์น (เกมจริงแสดง 0→90 นาที)
+      assert(delta >= 50 && delta <= 80, `clock เดินต่อเทิร์น ~67 วิ (ได้ ${delta})`);
+      // เทิร์นที่หยุดกลางคันเพราะบอลตาย = มี event ของ restart (goal/corner/goal kick/throw-in/foul)
+      const ev = s.history.at(-1).events;
+      if (ev.some((e) => e.startsWith('GOAL') || e.includes('Corner to') || e.includes('Goal kick to')
+        || e.includes('Throw-in to') || e.includes('PENALTY') || e.startsWith('Free kick'))) earlyStops++;
+      for (const e of ev) {
         if (e.includes('Corner to')) corners++;
         if (e.includes('Goal kick to')) goalKicks++;
         if (e.startsWith('GOAL')) goals++;
@@ -139,7 +143,7 @@ const playTurn = (s) => { startSimulation(s); let n = 0; while (!simTick(s)) if 
       assert(Number.isFinite(s.ball.x), 'NaN ball');
       assert(s.score.home >= 0 && s.score.away >= 0, 'score ผิด');
     }
-    assert(s.clock <= 38 * 8, 'clock รวมต้องไม่เกิน 38*8');
+    assert(s.clock === 90 * 60, 'clock ต้องจบที่ 90:00');
   }
   assert(earlyStops > 0, 'ต้องมีเทิร์นที่หยุดกลางคันเพราะบอลตายบ้าง');
   assert(corners > 0, 'ต้องมี corner เกิดในแมตช์');

@@ -70,7 +70,8 @@ push ขึ้น `claude/tactic-manager-lab-design-cvyqs9` แล้ว GitHub 
 3. **Resolution** — ตำแหน่งสุดท้ายกลายเป็นสถานะจริงของเทิร์นถัดไป (ไม่ reset กลับ formation)
 4. **Analysis** — อ่าน tactical scores 8 ตัว, event log และคำแนะนำจาก AI Assistant
    (ghost สีเหลืองบนสนาม = ตำแหน่งที่ AI แนะนำ)
-5. แก้เกมแล้วเล่นต่อ — แมตช์ MVP ยาว 38 เทิร์น (~5 นาทีจำลอง)
+5. แก้เกมแล้วเล่นต่อ — แมตช์เต็ม 90 นาที: 2 ครึ่ง ครึ่งละ 40 เทิร์น (รวม 80 เทิร์น)
+   นาฬิกาแมตช์เดิน 0→45 (พักครึ่ง ฟื้น stamina +35%, คู่แข่งเขี่ยครึ่งหลัง) →90:00 (Full Time)
 
 ### ปุ่มทั้งหมด
 
@@ -118,7 +119,7 @@ HTML + CSS + JavaScript (ES Modules) + Canvas API + localStorage — ไม่�
 มีแล้ว: สนาม 2D, นักเตะ 22 คน, ลากตำแหน่ง, 4 formations, ลูกบอล/possession,
 simulation 8 วินาที + commit state จริง, path history, tactical scores 8 ตัว,
 AI Assistant rule-based + ghost suggestion, match clock, turn history (10 เทิร์นล่าสุด),
-save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อมโอกาสยิงประตู
+save/load, export/import JSON, แมตช์เต็ม 90 นาที (2 ครึ่ง × 40 เทิร์น) + พักครึ่ง
 
 ## P2: Tactical Intelligence
 

@@ -13,7 +13,8 @@ export function createInitialState(homeFormation = '4-2-3-1') {
   const state = {
     phase: 'planning', // planning | simulating | finished
     turn: 1,
-    clock: 0,          // วินาทีจำลองที่ผ่านไป
+    half: 1,           // ครึ่งการแข่งขัน (1 หรือ 2)
+    clock: 0,          // นาฬิกาแมตช์ (วินาที, แสดง 0→90:00)
     score: { home: 0, away: 0 },
     teams: { home: home.team, away: away.team },
     players: [...home.players, ...away.players],

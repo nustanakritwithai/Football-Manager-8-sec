@@ -11,6 +11,7 @@ export function serialize(state) {
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
     turn: state.turn,
+    half: state.half ?? 1,
     clock: state.clock,
     phase: state.phase === 'simulating' ? 'planning' : state.phase,
     score: { ...state.score },
@@ -72,6 +73,7 @@ function bad(error) {
 // รวมข้อมูล save กลับเข้า state ที่มีอยู่ (สร้างจาก createInitialState มาก่อน)
 export function applySave(state, data) {
   state.turn = data.turn;
+  state.half = data.half ?? (data.turn > 40 ? 2 : 1);
   state.clock = data.clock;
   state.phase = data.phase === 'finished' ? 'finished' : 'planning';
   state.score = { home: data.score?.home ?? 0, away: data.score?.away ?? 0 };

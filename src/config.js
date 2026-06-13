@@ -12,7 +12,11 @@ export const TURN_SECONDS = 8;
 export const TICKS_PER_TURN = TICKS_PER_SECOND * TURN_SECONDS; // 80
 export const TICK_DT = 1 / TICKS_PER_SECOND;
 
-export const MATCH_TURNS = 38;   // ~5 นาทีจำลอง
+export const MATCH_TURNS = 80;   // แมตช์เต็ม 90 นาที: 2 ครึ่ง ครึ่งละ 40 เทิร์น (รวมทดเวลา)
+export const HALF_TURNS = 40;    // เทิร์นต่อครึ่ง
+export const MATCH_MINUTES = 90; // เวลาแมตช์ที่แสดงผล (นาที)
+export const MATCH_SECONDS = MATCH_MINUTES * 60; // 5400 — นาฬิกาแมตช์แสดง 0→90:00
+export const HALFTIME_STAMINA_BOOST = 35; // พักครึ่งฟื้น stamina (+points, cap 100)
 export const MAX_HISTORY = 10;   // เก็บ turn history ล่าสุด
 export const PATH_SAMPLE_EVERY = 4; // บันทึก path ทุกกี่ tick
 export const MAX_EVENTS_PER_TURN = 14;
