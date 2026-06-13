@@ -25,7 +25,7 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     teamPhases: { home: 'BUILD_UP', away: 'DEFENDING' },
     teamObjectives: { home: 'buildUp', away: 'midBlock' },
     passMemory: { lastPasserId: null, lastReceiverId: null, recentPasses: [] },
-    lastTurnStats: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0 },
+    lastTurnStats: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
     replayLog: [], // P3: dataset ต่อเทิร์นสำหรับ export ไปฝึกโมเดลภายหลัง
     // P5: ระบบจาก backlog วิจัย
     pendingPenalty: null,   // { team, takerId } รอผู้เล่นเลือกมุม

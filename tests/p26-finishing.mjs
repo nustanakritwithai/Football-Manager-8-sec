@@ -98,5 +98,53 @@ function makeScenario(x, y, opts = {}) {
   assert(totShotEvents / matches <= 30, 'shots ไม่ควรเฟ้อเกินจริง');
 }
 
+
+// ---- 6) P2.7 Cross: ปีกริมเส้นมีตัวรอในกรอบ → มี cross candidate ----
+{
+  const { evaluateCrossAction } = await import(`${BASE}/simulation.js`);
+  const { state, st } = makeScenario(92, 6); // ปีกริมเส้นซ้ายโซนสุดท้าย
+  const am = state.players.find((p) => p.team === 'home' && p.role === 'AM');
+  am.x = 95; am.y = 33; // ตัวรอกลางกรอบ
+  const cross = evaluateCrossAction(state, st, 0.3, null);
+  assert(cross && !cross.early, `ริมเส้นโซนสุดท้ายต้องได้ cross ปกติ (ได้ ${JSON.stringify(cross?.early)})`);
+  assert(cross.target.x > 80 && Math.abs(cross.target.y - 34) < 15, `เป้า cross ต้องอยู่โซนกรอบ (${cross?.target.x.toFixed(0)},${cross?.target.y.toFixed(0)})`);
+  console.log(`Cross OK — score ${cross.score.toFixed(2)} aiming ${cross.mate.role}`);
+
+  // ตรงกลางสนามห้ามมี cross
+  const { state: s2, st: st2 } = makeScenario(60, 34);
+  assert(evaluateCrossAction(s2, st2, 0.3, null) === null, 'ตรงกลางห้ามมี cross');
+}
+
+// ---- 7) P2.7 Early ball: ลึก + มี runner → early=true ----
+{
+  const { evaluateCrossAction } = await import(`${BASE}/simulation.js`);
+  const { state, st } = makeScenario(72, 7); // ริมเส้นแต่ลึก
+  const striker = state.players.find((p) => p.team === 'home' && p.role !== 'ST' && ['AM', 'CM'].includes(p.role));
+  striker.x = 75; striker.y = 30;
+  striker.runType = 'runIntoSpace';
+  striker.runTarget = { x: 92, y: 32 };
+  const cross = evaluateCrossAction(state, st, 0.2, null);
+  assert(cross && cross.early, `จากลึก + runner ต้องเป็น early ball (ได้ ${JSON.stringify(cross)})`);
+  assert((cross.target.x - st.x) > 5, 'early ball ต้องโยนไปข้างหน้า');
+  console.log(`Early ball OK — target (${cross.target.x.toFixed(0)},${cross.target.y.toFixed(0)})`);
+}
+
+// ---- 8) Full match: cross เกิดจริงและเกมไม่พัง ----
+{
+  let crossEvents = 0, matches = 4;
+  for (let m = 0; m < matches; m++) {
+    const state = createInitialState('4-4-2'); // แผนปีกกว้าง
+    state.teams.home.attackingWidth = 5;
+    state.tacticalScores = analyze(state).scores;
+    while (state.phase !== 'finished') {
+      playTurn(state);
+      crossEvents += state.history.at(-1).events.filter((e) => e.includes('Cross') || e.includes('Early ball')).length;
+      for (const p of state.players) assert(Number.isFinite(p.x), 'NaN after cross!');
+    }
+  }
+  assert(crossEvents > 0, `ทั้ง ${matches} แมตช์ต้องมี cross เกิดบ้าง (ได้ ${crossEvents})`);
+  console.log(`Cross in match OK — ${(crossEvents / matches).toFixed(1)} cross events/match`);
+}
+
 if (failures) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log('\nALL P2.6 FINISHING TESTS PASS ✅');
