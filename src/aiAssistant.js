@@ -214,6 +214,19 @@ export function generateAdvice(state, analysis, events, prevScores) {
     });
   }
 
+  // --- P2.7: cross / early ball ---
+  if (flags.crossesWasted) {
+    candidates.push({
+      priority: 61, severity: 'warn',
+      text: 'เปิดบอลเข้ากรอบหลายครั้งแต่แพ้ลูกกลางอากาศตลอด — เพิ่มตัวเติมเข้ากรอบ (ST/AM/ปีกเสาไกล) ก่อนเปิด หรือเปลี่ยนไปเจาะด้วย cutback แทน',
+    });
+  } else if (flags.crossWon) {
+    candidates.push({
+      priority: 41, severity: 'good',
+      text: 'ลูกเปิดเข้ากรอบมีตัวรอชนะลูกกลางอากาศได้ — width ของทีมเริ่มสร้างอันตรายจริง',
+    });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;

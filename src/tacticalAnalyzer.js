@@ -55,6 +55,12 @@ function detectFinishingIssues(state, flags) {
     && events.some((e) => e.includes('chose carry'));
   flags.goodCutback = events.some((e) => e.startsWith('Cutback chance created') && e.includes('our'));
 
+  // P2.7: เปิดบอลเข้ากรอบแต่ไม่มีตัวรอ/แพ้ลูกกลางอากาศตลอด
+  flags.crossWon = events.some((e) => e.includes('meets the cross') && e.startsWith('Our'));
+  flags.crossesWasted = (st.crosses ?? 0) >= 2
+    && !flags.crossWon
+    && events.filter((e) => e.startsWith('Cross cleared') && e.includes('their')).length >= 2;
+
   // ไม่มี end product: เข้า final third ติดกันหลายเทิร์นแต่ไม่เกิด shot/cutback เลย
   const recent = state.history.slice(-3);
   const finalThirdTurns = recent.filter((h) => h.teamPhase === 'FINAL_THIRD');

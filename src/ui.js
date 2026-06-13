@@ -518,7 +518,7 @@ function drawCarrierAction(ctx, state) {
   if (!p || state.ball.ownerPlayerId !== p.id) return;
   const labels = {
     pass: 'Pass', carry: 'Carry', dribble: 'Dribble', hold: 'Hold',
-    shoot: 'Shoot!', clear: 'Clear', switch: 'Switch',
+    shoot: 'Shoot!', clear: 'Clear', switch: 'Switch', cross: 'Cross!',
   };
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.font = 'bold 10px sans-serif';

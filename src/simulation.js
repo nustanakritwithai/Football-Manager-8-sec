@@ -61,8 +61,8 @@ export function startSimulation(state) {
     pendingPass: null,        // { fromId, startX, toRunner }
     justReceived: new Map(),  // playerId -> tick ที่เพิ่งได้บอล (first-time shot bonus)
     stats: {
-      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0 },
-      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0 },
+      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
+      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
     },
     congestion: null,
     lastAction: null,         // ป้าย action ล่าสุดของผู้ถือบอล (แสดงบนสนาม)
@@ -400,7 +400,10 @@ function updateBall(state) {
     const d = dist(b.x, b.y, b.targetX, b.targetY);
     const step = b.flightSpeed * TICK_DT;
 
+    // บอลโด่ง (cross) ลอยข้ามหัว — ตัดกลางทางไม่ได้ ไปวัดกันตอนบอลตก
+    const aerial = !!state.sim.pendingPass?.cross;
     for (const p of state.players) {
+      if (aerial) break;
       if (p.team === b.lastTouchTeam) continue;
       if (distP(p, b) < 1.2 && Math.random() < 0.16 + p.positioning / 300) {
         labelPendingPass(state, 0);
@@ -444,6 +447,13 @@ function updateBall(state) {
 
 function resolvePassArrival(state) {
   const b = state.ball;
+
+  // cross/early ball: ชิงลูกกลางอากาศ ไม่ใช่รับเรียบ
+  if (state.sim.pendingPass?.cross) {
+    resolveCrossArrival(state);
+    return;
+  }
+
   let nearest = null, best = Infinity;
   for (const p of state.players) {
     const d = distP(p, b);
@@ -603,6 +613,10 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const sw = switchOption(state, carrier);
   if (sw) acts.push({ type: 'switch', option: sw, score: sw.switchScore });
 
+  // --- CROSS / EARLY BALL (P2.7): เปิดบอลจากริมเส้นเข้ากรอบ ---
+  const cross = evaluateCrossAction(state, carrier, pressure, shot);
+  if (cross) acts.push(cross);
+
   // --- CARRY: พาบอลขึ้นหน้าเองเมื่อมีพื้นที่ ---
   const space = openSpaceAhead(state, carrier);
   if (pressure < 1.1 && space > CARRY_SPACE_THRESHOLD) {
@@ -743,6 +757,144 @@ export function evaluateShotAction(state, carrier, pressure) {
   return { type: 'shoot', score, zone, xg, angle, dGoal, blockers };
 }
 
+// ---------- P2.7: Cross / Early ball ----------
+// cross = เปิดจากริมเส้นโซนสุดท้ายเข้ากรอบ, early ball = โยนจากลึกกว่า
+// ข้ามแนวรับให้ runner ก่อนเกมรับตั้งหลักทัน
+
+export function evaluateCrossAction(state, carrier, pressure, shot) {
+  if (carrier.role === 'GK') return null;
+  const dir = attackDir(carrier.team);
+  const wide = Math.abs(carrier.y - 34) > 14;
+  if (!wide) return null;
+  const progress = dir === 1 ? carrier.x : PITCH.length - carrier.x;
+  if (progress < 58) return null; // ลึกเกินกว่าจะเปิด
+
+  const early = progress < 80; // เปิดจากลึก = early ball
+  const goalX = dir === 1 ? PITCH.length : 0;
+  const mates = teamPlayers(state, carrier.team)
+    .filter((m) => m.id !== carrier.id && m.role !== 'GK');
+  const opps = teamPlayers(state, carrier.team === 'home' ? 'away' : 'home')
+    .filter((o) => o.role !== 'GK');
+
+  // ตัวรอในกรอบ (สำหรับ cross ปกติ)
+  const inBoxZone = (p) => (dir === 1 ? p.x > PITCH.length - 22 : p.x < 22) && Math.abs(p.y - 34) < 16;
+  const boxMates = mates.filter(inBoxZone);
+  const boxDefs = opps.filter(inBoxZone);
+
+  // runner สำหรับ early ball: กำลังวิ่งเข้า space และอยู่หน้ากว่าบอล
+  const runner = mates.find(
+    (m) => m.runType === 'runIntoSpace' && m.runTarget && (m.x - carrier.x) * dir > -2
+  );
+
+  let target = null;
+  let aimMate = null;
+
+  if (early) {
+    if (!runner) return null;
+    // โยนข้ามแนวรับ: จุดตกระหว่าง runTarget กับหน้าประตู
+    const defs = opps.filter((o) => ['CB', 'LB', 'RB'].includes(o.role));
+    const lineX = defs.length
+      ? (dir === 1 ? Math.max(...defs.map((o) => o.x)) : Math.min(...defs.map((o) => o.x)))
+      : goalX - dir * 20;
+    target = {
+      x: clamp(lineX + dir * 5, dir === 1 ? carrier.x + 8 : 6, dir === 1 ? PITCH.length - 6 : carrier.x - 8),
+      y: clamp(runner.runTarget.y, 20, 48),
+    };
+    aimMate = runner;
+  } else {
+    if (!boxMates.length) return null;
+    // เป้าที่ marker ห่างที่สุด
+    let bestSpace = -1;
+    for (const m of boxMates) {
+      let marker = Infinity;
+      for (const o of opps) {
+        const d = distP(o, m);
+        if (d < marker) marker = d;
+      }
+      if (marker > bestSpace) { bestSpace = marker; aimMate = m; }
+    }
+    // นำบอลเข้าโซนอันตรายหน้าประตูเล็กน้อย
+    target = {
+      x: clamp(aimMate.x + dir * 2, 6, PITCH.length - 6),
+      y: clamp(lerp(aimMate.y, 34, 0.3), 22, 46),
+    };
+  }
+
+  let markerDist = Infinity;
+  for (const o of opps) {
+    const d = distP(o, aimMate);
+    if (d < markerDist) markerDist = d;
+  }
+
+  let score = 0.26
+    + clamp(markerDist / 12, 0, 0.18)
+    + Math.min(boxMates.length, 3) * 0.05
+    - Math.max(0, boxDefs.length - boxMates.length) * 0.05
+    + (carrier.passing / 100) * 0.15
+    - pressure * 0.08;
+
+  if (early) score += state.teamPhases[carrier.team] === 'TRANSITION_TO_ATTACK' ? 0.14 : 0.06;
+  if (shot && shot.angle < 0.18) score += 0.08;            // มุมยิงแคบ → เปิดดีกว่าฝืนยิง
+  if (state.teams[carrier.team].attackingWidth >= 4) score += 0.05; // ทีมเน้น wing play
+  // กลางกรอบแน่นเกิน เปิดเข้าไปก็โดนเคลียร์
+  if (boxDefs.length >= 5 && boxMates.length <= 1) score -= 0.12;
+
+  return { type: 'cross', score: clamp(score, 0, 1.2), target, early, mate: aimMate };
+}
+
+function executeCross(state, carrier, action) {
+  const sim = state.sim;
+  sim.pendingPass = { fromId: carrier.id, startX: state.ball.x, features: null, cross: true };
+  // บอลโด่ง: ความแม่นต่ำกว่าบอลเรียบ และ early ball ยิ่งเสี่ยง
+  const errMag = (1 - carrier.passing / 140) * rand(1, 5) + (action.early ? 1 : 0);
+  const ang = rand(0, Math.PI * 2);
+  startPass(state, carrier,
+    action.target.x + Math.cos(ang) * errMag,
+    action.target.y + Math.sin(ang) * errMag);
+  state.ball.ownerPlayerId = null;
+  state.possessionTeam = carrier.team;
+  sim.stats[carrier.team].crosses++;
+  const side = carrier.y < 34 ? 'left' : 'right';
+  recordEvent(state, action.early
+    ? `Early ball in behind from the ${side} (${carrier.team === 'home' ? 'us' : 'them'}, looking for ${action.mate.role})`
+    : `Cross into the box from the ${side} (${carrier.team === 'home' ? 'us' : 'them'}, aiming at ${action.mate.role})`);
+}
+
+// ชิงบอลโด่งในกรอบเมื่อ cross ตกถึงพื้นที่
+function resolveCrossArrival(state) {
+  const b = state.ball;
+  const contenders = state.players.filter((p) => p.role !== 'GK' && distP(p, b) < 4.2);
+
+  if (!contenders.length) {
+    b.isLoose = true;
+    recordEvent(state, 'Cross sails through — ball loose');
+    state.sim.pendingPass = null;
+    return;
+  }
+
+  let winner = null, bestW = -1;
+  for (const c of contenders) {
+    const atk = c.team === b.lastTouchTeam;
+    const w = c.positioning / 100
+      + c.aggression / 250
+      + (atk ? 0.08 : 0.12) // ฝ่ายรับได้เปรียบลูกกลางอากาศเล็กน้อย
+      + rand(0, 0.45)
+      - distP(c, b) * 0.05;
+    if (w > bestW) { bestW = w; winner = c; }
+  }
+
+  giveBall(state, winner);
+  state.sim.justReceived.set(winner.id, state.sim.tick);
+  if (winner.team === b.lastTouchTeam) {
+    recordEvent(state, `${winner.team === 'home' ? 'Our' : 'Their'} ${winner.role} meets the cross in the box!`);
+    state.sim.cooldowns.set(winner.id, 0.05); // จังหวะเดียว: ยิง/เฮดทันที
+  } else {
+    recordEvent(state, `Cross cleared — ${winner.team === 'home' ? 'our' : 'their'} ${winner.role} wins the aerial duel`);
+    noteTurnover(state, winner.team);
+  }
+  state.sim.pendingPass = null;
+}
+
 function carryAbility(p) {
   const byRole = { CM: 0.9, AM: 1, LW: 1, RW: 1, ST: 0.8, LB: 0.85, RB: 0.85, DM: 0.75, CB: 0.5, GK: 0 };
   return ((p.speed + p.decision) / 200) * (byRole[p.role] ?? 0.7);
@@ -824,6 +976,9 @@ function executeCarrierAction(state, carrier, action, pressure) {
       recordEvent(state, `Switch play → ${mate.role} on the ${mate.y < 34 ? 'left' : 'right'} (${carrier.team === 'home' ? 'us' : 'them'})`);
       break;
     }
+    case 'cross':
+      executeCross(state, carrier, action);
+      break;
     case 'carry':
       sim.carrierMove.set(carrier.id, { ...action.target, mode: 'carry' });
       sim.stats[carrier.team].carries++;
