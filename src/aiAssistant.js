@@ -192,6 +192,28 @@ export function generateAdvice(state, analysis, events, prevScores) {
     }
   }
 
+  // --- P2.6: finishing / end product ---
+  if (flags.missedShotOpportunity) {
+    candidates.push({
+      priority: 73, severity: 'warn',
+      text: flags.overCarryInBox
+        ? 'มีจังหวะยิงในกรอบแต่ผู้ถือบอล carry ต่อจนโดนบีบ — ถึง must-shoot zone แล้วต้องจบสกอร์ ไม่ใช่พาบอลสวย'
+        : 'ผู้ถือบอลอยู่ในมุมยิงดีแต่ไม่ยอมยิง ทำให้เสียโอกาส — เพิ่ม shot urgency ใน final third',
+    });
+  }
+  if (flags.noEndProduct) {
+    candidates.push({
+      priority: 63, severity: 'info',
+      text: 'ทีมพาบอลถึง final third ได้หลายเทิร์นแต่ไม่มี end product (ยิง/cutback/ทะลุช่อง) ลองดันตัวเติมเข้ากรอบให้มีเป้ารับบอลจังหวะสุดท้าย',
+    });
+  }
+  if (flags.goodCutback) {
+    candidates.push({
+      priority: 42, severity: 'good',
+      text: 'จังหวะ cutback จากริมกรอบหาตัวกลางเขตโทษทำได้ถูกต้อง — มุมแคบอย่าฝืนยิง รักษา pattern นี้ไว้',
+    });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;

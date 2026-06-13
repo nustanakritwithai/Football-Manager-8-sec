@@ -35,7 +35,39 @@ export function analyze(state) {
   // P3: similar situation retrieval (เทียบทั้งภาพปกติและภาพกระจก D2)
   flags.similarTurn = findSimilarPastTurn(state);
 
+  // P2.6: ตรวจปัญหาการจบสกอร์ใน final third
+  detectFinishingIssues(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2.6: finishing detections ----------
+
+function detectFinishingIssues(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const st = state.lastTurnStats || {};
+
+  // ควรยิงแต่ไม่ยิง (เทิร์นที่แล้ว)
+  flags.missedShotOpportunity = events.some(
+    (e) => e.startsWith('Must-shoot chance ignored') && e.includes('our')
+  );
+  flags.overCarryInBox = flags.missedShotOpportunity
+    && events.some((e) => e.includes('chose carry'));
+  flags.goodCutback = events.some((e) => e.startsWith('Cutback chance created') && e.includes('our'));
+
+  // ไม่มี end product: เข้า final third ติดกันหลายเทิร์นแต่ไม่เกิด shot/cutback เลย
+  const recent = state.history.slice(-3);
+  const finalThirdTurns = recent.filter((h) => h.teamPhase === 'FINAL_THIRD');
+  if (finalThirdTurns.length >= 2) {
+    const hadEndProduct = finalThirdTurns.some((h) =>
+      (h.events || []).some((e) =>
+        (e.includes('Shot chance') && e.includes('Our'))
+        || (e.startsWith('Cutback chance created') && e.includes('our'))
+        || e.startsWith('PENALTY to us')
+      )
+    ) || (st.shots ?? 0) > 0 || (st.cutbacks ?? 0) > 0;
+    flags.noEndProduct = !hadEndProduct;
+  }
 }
 
 // ---------- P3: Shot probability (xG เบื้องต้น แบบ TacticAI) ----------

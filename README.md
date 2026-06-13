@@ -173,5 +173,18 @@ save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อ
   เลือกมุมยิง/ทางพุ่ง GK สู้กับ AI แบบ mixed strategy
 - **🧠 Train Pass Model** — ทุกการจ่ายของทีมถูกเก็บเป็นข้อมูลฝึก กดปุ่มเดียว
   ฝึก logistic regression ใน browser แล้วโมเดลช่วยเลือกจังหวะจ่ายจริงในเกม
+- **Finishing instinct (P2.6)** — ใน final third นักเตะเปลี่ยน mindset จาก
+  "progression" เป็น "end product": must-shoot zone (<16m มุมเปิด) ยิงเกือบทุกกรณี,
+  มุมแคบริมกรอบ → cutback หาตัวกลางเขตโทษ, มีเพื่อน tap-in โล่งกว่า → จ่าย,
+  ห้าม hold/carry เพลินหน้าประตู และห้ามยิงมั่วจากไกล (>27m/มุมแคบ = ไม่ยิง)
+
+## การทดสอบ
+
+```bash
+node tests/p2-tactical.mjs    # movement radius, no-teleport, anti-clustering
+node tests/p3-tools.mjs       # preview, adjust, corner, retrieval, dataset
+node tests/p5-research.mjs    # penalty, learning, what-if, fog of war
+node tests/p26-finishing.mjs  # must-shoot, cutback, no wild shots, shot volume
+```
 
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime
