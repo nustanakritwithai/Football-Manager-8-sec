@@ -26,7 +26,7 @@ export function initUI(state, handlers) {
   const ids = [
     'clock', 'turn', 'phase', 'scoreline', 'awayStyle', 'teamPhase',
     'btnPlay', 'btnReset', 'btnSave', 'btnLoad', 'btnExport', 'btnImport', 'btnClearPaths',
-    'btnPreview', 'btnAdjust', 'btnApplyGhosts', 'btnCorner', 'btnExportDataset',
+    'btnPreview', 'btnAdjust', 'btnApplyGhosts', 'btnCorner', 'btnFreeKick', 'btnExportDataset',
     'btnSpaceMap', 'btnFog', 'btnWhatIf', 'btnTrain',
     'penaltyCard', 'penaltyInfo',
     'previewSummary', 'xgRow', 'spaceShare',
@@ -101,6 +101,7 @@ export function initUI(state, handlers) {
   els.btnAdjust.addEventListener('click', handlers.onAdjust);
   els.btnApplyGhosts.addEventListener('click', handlers.onApplyGhosts);
   els.btnCorner.addEventListener('click', handlers.onCorner);
+  els.btnFreeKick.addEventListener('click', handlers.onFreeKick);
   els.btnExportDataset.addEventListener('click', handlers.onExportDataset);
 
   // P4: pitch control map toggle
@@ -187,7 +188,7 @@ export function updateDashboard(state) {
     : `▶ Play Next ${TURN_SECONDS} Seconds`;
   for (const b of [
     els.btnReset, els.btnExport, els.btnImport, els.formation,
-    els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner, els.btnWhatIf, els.btnTrain,
+    els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner, els.btnFreeKick, els.btnWhatIf, els.btnTrain,
   ]) {
     b.disabled = busy || pen;
   }

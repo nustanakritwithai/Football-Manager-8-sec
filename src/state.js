@@ -42,6 +42,7 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     replayLog: [], // P3: dataset ต่อเทิร์นสำหรับ export ไปฝึกโมเดลภายหลัง
     // P5: ระบบจาก backlog วิจัย
     pendingPenalty: null,   // { team, takerId } รอผู้เล่นเลือกมุม
+    setPiece: null,         // P2.9: { type:'corner'|'freeKick', takerId, deliverTick } ลูกตั้งเตะ
     passSamples: [],        // ตัวอย่างการจ่ายบอล (features + สำเร็จ/พลาด) ไว้ฝึกโมเดล
     passModel: null,        // logistic regression ที่ฝึกแล้ว { w, b, acc, n }
     lastTurnEvents: [],
