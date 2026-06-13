@@ -19,6 +19,10 @@ import { isOpponentVisible } from './ui.js';
 import { deepClone } from './utils.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { giveBall } from './ball.js';
+import {
+  initAudio, unlockAudio, toggleSound, isSoundOn,
+  playWhistle, playCheer, playKick, playSave, playPost, playOoh,
+} from './audio.js';
 
 const canvas = document.getElementById('pitchCanvas');
 canvas.width = CANVAS_W;
@@ -27,6 +31,57 @@ const ctx = canvas.getContext('2d');
 
 const state = createInitialState('4-2-3-1');
 let whatIfStash = null; // state จริงที่เก็บไว้ระหว่างโหมด What-if
+
+// ---------- เสียง + เอฟเฟกต์บรรยากาศ (P-juice) ----------
+const goalBannerEl = document.getElementById('goalBanner');
+const btnSound = document.getElementById('btnSound');
+let soundIdx = 0;          // event ที่เล่นเสียงไปแล้วในเทิร์นนี้
+let goalBannerTimer = null;
+let fullTimePlayed = false;
+
+initAudio();
+if (btnSound) {
+  btnSound.textContent = isSoundOn() ? '🔊' : '🔇';
+  btnSound.addEventListener('click', () => {
+    btnSound.textContent = toggleSound() ? '🔊' : '🔇';
+  });
+}
+
+function showBanner(text, kind = 'goal') {
+  if (!goalBannerEl) return;
+  goalBannerEl.textContent = text;
+  goalBannerEl.className = `goal-banner show banner-${kind}`;
+  if (goalBannerTimer) clearTimeout(goalBannerTimer);
+  goalBannerTimer = setTimeout(() => goalBannerEl.classList.remove('show'), 2600);
+}
+
+function playEventSound(e) {
+  // ใช้บรรทัด canonical อันเดียว (GOAL!!! / Penalty scored) กันเชียร์ซ้ำกับ "Shot — GOAL!"
+  if (e.startsWith('GOAL') || e.startsWith('Penalty scored')) {
+    playCheer();
+    const us = e.includes(state.teams.home.teamName) || e.includes('our') || e.includes('Our');
+    showBanner(us ? '⚽ GOAL!' : '⚽ GOAL — คู่แข่ง', us ? 'goal' : 'goal-away');
+  } else if (e.startsWith('Half Time')) {
+    playWhistle('long');
+    showBanner('HALF TIME — พักครึ่ง', 'info');
+  } else if (e.includes('hits the post')) {
+    playPost();
+  } else if (e.includes('saved') || e.includes('Great save') || e.includes('parried') || e.includes("can't hold")) {
+    playSave();
+  } else if (e.startsWith('Shot chance')) {
+    playKick();
+    if (e.includes('[BIG CHANCE]')) playOoh();
+  } else if (e.startsWith('Free kick') || e.includes('PENALTY') || e.includes('Foul in the box') || e.includes('Yellow card')) {
+    playWhistle('short');
+  }
+}
+
+function processEventSounds() {
+  const evs = state.lastTurnEvents;
+  if (!Array.isArray(evs)) return;
+  if (soundIdx > evs.length) soundIdx = 0; // เทิร์นใหม่ (events ถูกเคลียร์)
+  while (soundIdx < evs.length) { playEventSound(evs[soundIdx]); soundIdx++; }
+}
 
 function clearPreview() {
   state.ui.preview = null;
@@ -42,7 +97,8 @@ initInput(
 initUI(state, {
   onPlay() {
     clearPreview();
-    if (startSimulation(state)) updateDashboard(state);
+    unlockAudio(); // ปลดล็อกเสียงด้วย user gesture แรก (autoplay policy)
+    if (startSimulation(state)) { soundIdx = 0; updateDashboard(state); }
   },
   onFormation(name) {
     clearPreview();
@@ -237,8 +293,14 @@ function frame(now) {
       tickAccumulator -= TICK_DT;
       done = simTick(state);
     }
+    processEventSounds(); // เล่นเสียงตามเหตุการณ์ที่เพิ่งเกิด (sync กับภาพ)
     if (done) {
       tickAccumulator = 0;
+      if (state.phase === 'finished' && !fullTimePlayed) {
+        fullTimePlayed = true;
+        playWhistle('long');
+        showBanner('FULL TIME — จบเกม', 'info');
+      }
       updateDashboard(state);
     }
   } else if (state.ui.scoresDirty) {
