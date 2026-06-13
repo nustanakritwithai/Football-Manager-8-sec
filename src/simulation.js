@@ -12,7 +12,7 @@ import {
   POST_HIT_CHANCE, POST_REBOUND_POWER, GK_HOLD_CHANCE, GK_PARRY_POWER, GK_PARRY_CENTER_CHANCE,
   GOAL_HALF_WIDTH, CROSSBAR_HEIGHT, PENALTY_AREA_DEPTH, PENALTY_AREA_HALF_WIDTH,
   PENALTY_SPOT_DISTANCE, SIX_YARD_DEPTH, FOUL_BASE_RATE, FOUL_PRESSURE_WEIGHT,
-  YELLOW_CARD_THRESHOLD,
+  YELLOW_CARD_THRESHOLD, TACKLE_RADIUS, TACKLE_BASE_CHANCE,
   GOAL_HEIGHT, SHOT_XG_MIN, SHOT_XG_MAX, BIG_CHANCE_XG, LONG_SHOT_MAX_XG,
   GK_BASE_REACH, GK_REACTION_WEIGHT, SHOT_TARGET_ERROR_BASE, SHOT_PRESSURE_ERROR,
   POST_CHANCE_MAX, REBOUND_CHANCE_BASE,
@@ -80,6 +80,7 @@ export function startSimulation(state) {
     possessionStart: state.possessionTeam,
     pendingPass: null,        // { fromId, startX, toRunner }
     justReceived: new Map(),  // playerId -> tick ที่เพิ่งได้บอล (first-time shot bonus)
+    holdCount: new Map(),     // playerId -> จำนวนครั้งที่เลือก hold ติดกัน (กันถือบอลค้างทั้งเทิร์น)
     stats: {
       home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
       away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
@@ -403,6 +404,8 @@ function stepTick(state) {
     const dir = attackDir(o.team);
     state.ball.x = clamp(o.x + dir * 0.8, 0.5, PITCH.length - 0.5);
     state.ball.y = o.y;
+    // fix: เขี่ย/แย่งบอลจากผู้ถือบอลที่พักบอล → บอลกระเด้งออก (กันบอลค้างนิ่งใน midblock)
+    if (resolveTackle(state, o)) return;
     // P2.8: ฟาวล์จากการเข้าปะทะผู้ถือบอล → free kick / penalty
     if (checkFoul(state, o)) return;
   }
@@ -747,6 +750,52 @@ function foulSeverity(state, tackler, carrier) {
   return clamp(0.2 + beaten + dangerous + tacticalFoul + rand(0, 0.2) - tackler.discipline / 100 * 0.2, 0, 1);
 }
 
+// fix: แย่ง/เขี่ยบอลจากผู้ถือบอลที่ "พักบอล/บังบอล" (ไม่ได้พาบอลหนีเร็ว)
+// กันบอลค้างนิ่งใน midblock — ทำให้บอลกระเด้งออกเป็น loose ball / เปลี่ยนมือ
+function resolveTackle(state, carrier) {
+  if (carrier.role === 'GK') return false;
+  const sim = state.sim;
+  if (sim.tick % 3 !== 0) return false; // ตรวจเป็นจังหวะ ไม่ใช่ทุก tick
+  // ยกเว้นตอนกำลัง carry/dribble (มี contest ของตัวเองอยู่แล้ว)
+  const move = sim.carrierMove.get(carrier.id);
+  if (move && (move.mode === 'carry' || move.mode === 'dribble')) return false;
+
+  let tk = null, best = TACKLE_RADIUS;
+  for (const o of state.players) {
+    if (o.team === carrier.team || o.role === 'GK') continue;
+    const d = distP(o, carrier);
+    if (d < best) { best = d; tk = o; }
+  }
+  if (!tk) return false;
+
+  const control = (carrier.decision * 0.4 + carrier.passing * 0.3 + carrier.stamina * 0.3) / 100;
+  const chance = clamp(
+    TACKLE_BASE_CHANCE + (tk.tackling / 100) * 0.06 + (tk.aggression / 100) * 0.02 - control * 0.05,
+    0.01, 0.16
+  );
+  if (Math.random() >= chance) return false;
+
+  const dx = carrier.x - tk.x, dy = carrier.y - tk.y;
+  const mag = Math.hypot(dx, dy) || 1;
+  const who = tk.team === 'home' ? 'Our' : 'Their';
+  if (Math.random() < 0.55) {
+    // เขี่ยหลุด — บอลกระเด้งออกจากจุดปะทะ
+    makeLoose(state,
+      (dx / mag) * rand(4, 8) + rand(-2, 2),
+      (dy / mag) * rand(4, 8) + rand(-2, 2),
+      rand(0, 2), 'loose');
+    markLastTouch(state.ball, tk);
+    markSecondBall(state, 'loose', tk.team);
+    setBallFx(state, 'Tackle!');
+    recordEvent(state, `${who} ${tk.role} pokes the ball loose with a tackle`);
+  } else {
+    giveBall(state, tk);
+    recordEvent(state, `${who} ${tk.role} wins the ball with a tackle`);
+    noteTurnover(state, tk.team);
+  }
+  return true;
+}
+
 // ตรวจฟาวล์เมื่อ defender จ่อผู้ถือบอล — คืน true ถ้าเกิดฟาวล์ (เทิร์นถูกหยุด)
 function checkFoul(state, carrier) {
   if (carrier.role === 'GK') return false;
@@ -1064,9 +1113,17 @@ function decideCarrier(state, carrier) {
   const move = sim.carrierMove.get(carrier.id);
   if (move && move.mode !== 'hold') {
     const reached = dist(carrier.x, carrier.y, move.x, move.y) < 1.2;
-    if (!reached && pressure < 1.6) return;
+    // anti-stuck: ถ้าพาบอลแต่แทบไม่ขยับ (โดน role-zone ดึงกลับ/ติดขอบ) หลายจังหวะ
+    // ให้ล้ม carry แล้วตัดสินใจใหม่ (จ่าย/อื่นๆ) เพื่อไม่ให้บอลค้างอยู่กับที่
+    const moved = dist(carrier.x, carrier.y, move._px ?? carrier.x, move._py ?? carrier.y);
+    move._stuck = moved < 0.25 ? (move._stuck || 0) + 1 : 0;
+    move._px = carrier.x; move._py = carrier.y;
+    if (!reached && pressure < 1.6 && move._stuck < 6) return;
+    const wasStuck = move._stuck >= 6;
     sim.carrierMove.delete(carrier.id);
     sim.cooldowns.set(carrier.id, 0); // ตัดสินใจทันที
+    // พาบอลแล้วค้างอยู่กับที่ (โดนดึงกลับโซน/ติดขอบ) → บังคับรีไซเคิลบอลออกไป ไม่ให้บอลแช่
+    if (wasStuck) { forceRecycle(state, carrier, pressure); return; }
   }
 
   const cd = sim.cooldowns.get(carrier.id) ?? rand(0.2, 0.6);
@@ -1079,8 +1136,30 @@ function decideCarrier(state, carrier) {
   const action = evaluateBallCarrierAction(state, carrier, pressure);
   executeCarrierAction(state, carrier, action, pressure);
   carrier.currentAction = action.type;
+  // นับ hold ติดกัน → เทิร์นถัดไปจะถูกลดน้ำหนัก ไม่ให้ยืนถือบอลค้างทั้งเทิร์น
+  if (action.type === 'hold') sim.holdCount.set(carrier.id, (sim.holdCount.get(carrier.id) || 0) + 1);
+  else sim.holdCount.delete(carrier.id);
   sim.lastAction = { type: action.type, playerId: carrier.id };
   sim.cooldowns.set(carrier.id, decisionDelay(carrier, pressure));
+}
+
+// บังคับเอาบอลออกจากเท้าเมื่อ carry ค้าง — จ่ายตัวที่ดีที่สุด ถ้าไม่มีก็เขี่ยไปข้างหน้า
+function forceRecycle(state, carrier, pressure) {
+  const opts = passOptions(state, carrier, pressure);
+  if (opts.length) {
+    executePass(state, carrier, opts[0], pressure);
+    carrier.currentAction = 'pass';
+    state.sim.lastAction = { type: 'pass', playerId: carrier.id };
+  } else {
+    const dir = attackDir(carrier.team);
+    makeLoose(state, dir * rand(6, 12), rand(-5, 5), rand(0, 2), 'loose');
+    markLastTouch(state.ball, carrier);
+    markSecondBall(state, 'loose', carrier.team);
+    carrier.currentAction = 'clear';
+    state.sim.lastAction = { type: 'clear', playerId: carrier.id };
+    recordEvent(state, `${carrier.team === 'home' ? 'Our' : 'Their'} ${carrier.role} knocks it forward to keep play moving`);
+  }
+  state.sim.cooldowns.set(carrier.id, decisionDelay(carrier, pressure));
 }
 
 export function evaluateBallCarrierAction(state, carrier, pressure) {
@@ -1201,7 +1280,9 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   if (inAttThird) holdScore -= 0.12;
   if (shot?.zone === 'must') holdScore -= 0.2;
   if (dGoal < 25 && pressure > 0.8) holdScore -= 0.15;
-  holdScore -= stale * 0.12; // ครองนานเกินไปอย่าพักบอลอีก
+  holdScore -= stale * 0.12; // ครองนานเกินไป (ข้ามเทิร์น) อย่าพักบอลอีก
+  // กันถือบอลค้างทั้งเทิร์น: ยิ่ง hold ติดกันยิ่งไม่น่าเลือก → บังคับให้รีไซเคิล/พาบอล
+  holdScore -= (state.sim?.holdCount?.get(carrier.id) || 0) * 0.2;
   acts.push({ type: 'hold', score: holdScore });
 
   // --- CLEAR: เคลียร์เมื่อเสี่ยงหน้ากรอบตัวเอง ---

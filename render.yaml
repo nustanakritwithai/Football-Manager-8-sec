@@ -9,7 +9,10 @@ services:
     headers:
       - path: /src/*
         name: Cache-Control
-        value: public, max-age=3600
+        value: no-cache, max-age=0
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache, max-age=0
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

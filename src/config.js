@@ -109,6 +109,8 @@ export const FOUL_BASE_RATE = 0.05;          // อัตราฟาวล์�
 export const FOUL_PRESSURE_WEIGHT = 0.12;    // น้ำหนัก pressure ต่อโอกาสฟาวล์
 export const YELLOW_CARD_THRESHOLD = 0.62;   // foulSeverity เกินนี้ = ใบเหลือง
 export const ADVANTAGE_SECONDS = 2.0;        // ได้เปรียบหลังฟาวล์ก่อนดึงกลับมาเป็นฟรีคิก
+export const TACKLE_RADIUS = 1.5;            // ระยะที่กองหลังเขี่ย/แย่งบอลจากผู้ถือบอลที่พักบอล
+export const TACKLE_BASE_CHANCE = 0.08;      // โอกาสแย่งบอลต่อจังหวะปะทะ (กันบอลค้างเพราะยืนถือนิ่ง)
 
 // ---------- P2.9: Finishing Engine ----------
 export const GOAL_HEIGHT = 2.44;             // ความสูงประตู (เมตร)

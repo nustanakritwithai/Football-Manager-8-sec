@@ -112,6 +112,32 @@ function playTurn(state) {
   console.log(`Test 8 OK — worst DEFENDING streak ${worst} เทิร์น (มี press escalation กัน stuck)`);
 }
 
+// ---- Test 9: บอลไม่ค้าง — ผู้ถือบอลต้องไม่ยืนถือ/พาบอลค้างอยู่กับที่ทั้งเทิร์น ----
+{
+  const { getPlayer } = await import(`${BASE}/team.js`);
+  let worstOwnedStatic = 0;
+  for (let m = 0; m < 12; m++) {
+    const s = createInitialState('4-2-3-1');
+    s.tacticalScores = analyze(s).scores;
+    while (s.phase !== 'finished') {
+      startSimulation(s);
+      let lbx = s.ball.x, lby = s.ball.y, stat = 0, done = false, n = 0;
+      while (!done) {
+        done = simTick(s); if (++n > 200) break;
+        const b = s.ball;
+        const owned = b.ownerPlayerId && !b.isLoose && !b.inFlight;
+        const moved = Math.hypot(b.x - lbx, b.y - lby);
+        if (owned && moved < 0.05) { stat++; worstOwnedStatic = Math.max(worstOwnedStatic, stat); }
+        else stat = 0;
+        lbx = b.x; lby = b.y;
+      }
+    }
+  }
+  // ก่อนแก้: ผู้ถือบอลเคย carry ค้าง/ยืนถือนิ่งได้ ~70 tick (เกือบทั้งเทิร์น) → บอลแช่
+  assert(worstOwnedStatic < 45, `บอลในครอบครองค้างอยู่กับที่นานเกินไป (${worstOwnedStatic} ticks) — ควร recycle/เขี่ยออก`);
+  console.log(`Test 9 OK — owned ball ค้างนานสุด ${worstOwnedStatic} ticks (มี anti-stuck recycle)`);
+}
+
 // ---- Test 7: save/load รวม legacy save (v1 ไม่มี field P2) ----
 {
   const state = createInitialState('4-2-3-1');
