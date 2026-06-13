@@ -12,7 +12,7 @@ import { initUI, updateDashboard, drawOverlays, drawTooltip, setStatus, setPrevi
 import { saveToLocal, loadFromLocal, exportJSON, importJSON, exportDataset } from './saveLoad.js';
 import { runPreview } from './preview.js';
 import { suggestDefensiveAdjustments, applyGhostsAsCommands } from './refine.js';
-import { setupCornerScenario } from './scenarios.js';
+import { setupCornerScenario, setupFreeKickScenario } from './scenarios.js';
 import { resolvePenalty } from './penalty.js';
 import { trainPassModel } from './learning.js';
 import { isOpponentVisible } from './ui.js';
@@ -158,6 +158,14 @@ initUI(state, {
     clearPreview();
     if (setupCornerScenario(state)) {
       setStatus('จัดสถานการณ์เตะมุมแล้ว');
+      updateDashboard(state);
+    }
+  },
+  onFreeKick() {
+    if (state.phase === 'simulating') return;
+    clearPreview();
+    if (setupFreeKickScenario(state)) {
+      setStatus('จัดฟรีคิกระยะยิงแล้ว');
       updateDashboard(state);
     }
   },

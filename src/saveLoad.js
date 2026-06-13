@@ -103,6 +103,7 @@ export function applySave(state, data) {
   state.replayLog = [];
   state.ui.preview = null;
   state.pendingPenalty = null;
+  state.setPiece = null;
   state.passSamples = [];
   state.passModel = (data.passModel && Array.isArray(data.passModel.w)) ? data.passModel : null;
   state.ui.whatIf = false;

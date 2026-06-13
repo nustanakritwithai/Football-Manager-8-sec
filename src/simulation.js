@@ -140,6 +140,7 @@ function finishSimulation(state) {
   state.clock = Math.round((state.turn / MATCH_TURNS) * MATCH_SECONDS);
   if (!sim.endedByRestart) state.playState = 'live';
   state.lastTurnStats = { ...sim.stats.home };
+  state.setPiece = null; // ลูกตั้งเตะถูกเล่นไปแล้ว (หรือหมดจังหวะ) เล่นปกติต่อ
 
   // P2.8/fix: ติดตามการครองบอลยืดเยื้อ — ถ้าทีมเดิมครองต่อเนื่องโดยไม่มีการยิง = stall
   // ใช้เร่ง pressing ของอีกฝ่ายให้แย่งบอลคืน กัน "ติด DEFENDING/midBlock วนไม่จบ"
@@ -1135,8 +1136,104 @@ function noteTurnover(state, gainingTeam) {
 
 // ---------- Ball Carrier Decision (P2) ----------
 
+// ---------- P2.9: Set pieces (corner / free kick) ----------
+
+// คนเตะตัดสินใจ: corner = เปิดเข้ากรอบลุ้นโหม่ง, free kick = ยิงถ้าได้ระยะ ไม่งั้นเปิด/จ่าย
+function setPieceAction(state, taker) {
+  const dir = attackDir(taker.team);
+  const goal = goalAttackedBy(taker.team);
+  const dGoal = distP(taker, goal);
+
+  if (state.setPiece.type === 'freeKick') {
+    const angle = goalOpenAngle(taker, taker.team);
+    // ยิงตรงเมื่อได้ระยะและมุมพอยิงได้ (ระยะยิงฟรีคิกจริง ~28m)
+    if (dGoal < 28 && angle > 0.1) {
+      return { type: 'shoot', zone: dGoal < 20 ? 'good' : 'normal' };
+    }
+    // ไกล/มุมแคบ: ถ้าอยู่สูงพอเปิดเข้ากรอบ ไม่งั้นจ่ายขึ้นหน้า
+    const cross = buildSetPieceCross(state, taker, 'freeKick');
+    if (cross) return cross;
+    const opts = passOptions(state, taker, 0);
+    if (opts[0]) return { type: 'pass', option: opts[0] };
+    return { type: 'hold' };
+  }
+
+  // corner: เปิดเข้ากรอบเสมอ
+  const cross = buildSetPieceCross(state, taker, 'corner');
+  if (cross) return cross;
+  // เผื่อไม่มีตัวในกรอบ: โยนกลางกรอบไว้ก่อน
+  return {
+    type: 'cross', early: false, setPiece: 'corner',
+    target: { x: clamp(goal.x - dir * 9, 6, PITCH.length - 6), y: 34 },
+    mate: taker,
+  };
+}
+
+// หาเป้าหมายในกรอบที่ดีที่สุด แล้วสร้าง action เปิดบอลโด่ง (ใช้ aerial duel เดิม)
+function buildSetPieceCross(state, taker, type) {
+  const dir = attackDir(taker.team);
+  const goalX = dir === 1 ? PITCH.length : 0;
+  const dangerSpot = { x: goalX - dir * 10, y: 34 }; // แถวจุดโทษ
+  const opps = teamPlayers(state, taker.team === 'home' ? 'away' : 'home').filter((o) => o.role !== 'GK');
+  const inBox = (p) => (dir === 1 ? p.x > PITCH.length - 18 : p.x < 18) && Math.abs(p.y - 34) < 18;
+  const boxMates = teamPlayers(state, taker.team)
+    .filter((m) => m.id !== taker.id && m.role !== 'GK' && inBox(m));
+  if (!boxMates.length) return null;
+
+  // เป้า = ตัวที่ marker ห่างสุด + อยู่โซนอันตราย + โหม่งดี (positioning/aggression)
+  let best = null, bestScore = -Infinity;
+  for (const m of boxMates) {
+    let marker = Infinity;
+    for (const o of opps) { const d = distP(o, m); if (d < marker) marker = d; }
+    const danger = 1 - Math.min(distP(m, dangerSpot) / 16, 1);
+    const aerial = (m.positioning + m.aggression) / 200;
+    const score = marker * 0.5 + danger * 5 + aerial * 2;
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return {
+    type: 'cross', early: false, setPiece: type,
+    target: {
+      x: clamp(best.x + dir * 1, 6, PITCH.length - 6),
+      y: clamp(lerp(best.y, 34, 0.25), 22, 46),
+    },
+    mate: best,
+  };
+}
+
+function logSetPiece(state, taker, type, action) {
+  const us = taker.team === 'home' ? 'us' : 'them';
+  if (type === 'corner') {
+    recordEvent(state, `Corner whipped into the box (${us}, aiming at ${action.mate?.role ?? 'the area'})`);
+  } else if (action.type === 'shoot') {
+    recordEvent(state, `Direct free kick — shot on goal! (${us})`);
+  } else if (action.type === 'cross') {
+    recordEvent(state, `Free kick floated into the box (${us})`);
+  } else {
+    recordEvent(state, `Free kick played short (${us})`);
+  }
+}
+
 function decideCarrier(state, carrier) {
   const sim = state.sim;
+
+  // P2.9: ลูกตั้งเตะ — คนเตะต้องเปิด/ยิงเข้าเกม ไม่ใช่เลี้ยงเอง
+  if (state.setPiece && carrier.id === state.setPiece.takerId) {
+    const sp = state.setPiece;
+    if (sim.tick < (sp.deliverTick ?? 4)) {
+      // ตั้งท่าก่อนเตะ ให้เพื่อนในกรอบขยับเข้าที่ ตัวเตะยืนนิ่งคาบอล
+      sim.carrierMove.set(carrier.id, { x: carrier.x, y: carrier.y, mode: 'hold' });
+      return;
+    }
+    const action = setPieceAction(state, carrier);
+    logSetPiece(state, carrier, sp.type, action);
+    executeCarrierAction(state, carrier, action, 0);
+    carrier.currentAction = action.type;
+    sim.lastAction = { type: action.type, playerId: carrier.id };
+    state.setPiece = null; // เตะแล้ว เล่นปกติต่อ (โหม่ง/เก็บตก/second ball)
+    sim.cooldowns.set(carrier.id, 0.5);
+    return;
+  }
+
   const pressure = computePressure(state, carrier);
 
   // ถ้ากำลัง carry/dribble อยู่: ทำต่อจนถึงเป้า หรือโดนบีบหนักค่อยคิดใหม่
@@ -1507,6 +1604,7 @@ function executeCross(state, carrier, action) {
   state.ball.ownerPlayerId = null;
   state.possessionTeam = carrier.team;
   sim.stats[carrier.team].crosses++;
+  if (action.setPiece) return; // ลูกตั้งเตะ log แยกแล้วใน logSetPiece
   const side = carrier.y < 34 ? 'left' : 'right';
   recordEvent(state, action.early
     ? `Early ball in behind from the ${side} (${carrier.team === 'home' ? 'us' : 'them'}, looking for ${action.mate.role})`

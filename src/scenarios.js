@@ -93,11 +93,86 @@ export function setupCornerScenario(state) {
   state.ball.x = taker.x;
   state.ball.y = taker.y;
   giveBall(state, taker);
+  // P2.9: ตั้งเป็นลูกเตะมุม — คนเตะจะเปิดเข้ากรอบลุ้นโหม่ง ไม่เลี้ยงเอง
+  state.setPiece = { type: 'corner', takerId: taker.id, deliverTick: 5 };
+  state.pendingPenalty = null;
 
   state.assistant = {
     messages: [{
       severity: 'info',
-      text: 'จัดสถานการณ์เตะมุมแล้ว — ลากตัวโจมตีในกรอบเพื่อหาช่องว่าง (ghost AI ช่วยได้) แล้วกด Play เพื่อดูลูกเตะมุมใน 8 วินาที',
+      text: 'จัดสถานการณ์เตะมุมแล้ว — ลากตัวโจมตีในกรอบเพื่อหาช่องว่าง (ghost AI ช่วยได้) แล้วกด Play คนเตะจะเปิดเข้ากรอบให้ลุ้นโหม่ง',
+    }],
+    ghosts: [],
+  };
+  state.ui.scoresDirty = true;
+  return true;
+}
+
+// P2.9: จัดสถานการณ์ฟรีคิกฝั่งเรา (ระยะยิงตรง ~22m เยื้องขวาเล็กน้อย)
+export function setupFreeKickScenario(state, spot) {
+  if (state.phase === 'simulating') return false;
+
+  const home = teamPlayers(state, 'home');
+  const away = teamPlayers(state, 'away');
+  const fk = spot || { x: PITCH.length - 22, y: 30 };
+
+  const used = new Set();
+  const place = (p, x, y) => {
+    if (!p) return;
+    used.add(p.id);
+    p.x = x; p.y = y;
+    p.targetX = x; p.targetY = y;
+    p.intendedTarget = null;
+    p.commandLocked = false;
+    p.runType = null;
+    p.runTarget = null;
+    p.pathHistory = [];
+  };
+
+  // คนเตะ: เลือก shooting สูงสุด
+  const taker = home
+    .filter((p) => p.role !== 'GK')
+    .sort((a, b) => b.shooting - a.shooting)[0];
+  place(taker, fk.x, fk.y);
+
+  place(home.find((p) => p.role === 'GK'), 6, 34);
+
+  // ตัวรอเก็บตก/โหม่งในและรอบกรอบ
+  const attackers = home.filter((p) => !used.has(p.id) && ['ST', 'AM', 'CM', 'LW', 'RW', 'CB'].includes(p.role));
+  const spots = [
+    [PITCH.length - 11, 30], [PITCH.length - 9, 38], [PITCH.length - 14, 34],
+    [PITCH.length - 18, 24], [PITCH.length - 17, 44], [PITCH.length - 24, 34],
+  ];
+  attackers.forEach((p, i) => place(p, spots[Math.min(i, spots.length - 1)][0], spots[Math.min(i, spots.length - 1)][1]));
+  // ที่เหลือกันสวน
+  home.filter((p) => !used.has(p.id)).forEach((p, i) => place(p, 55 - i * 4, 26 + i * 8));
+
+  // คู่แข่ง: ตั้งกำแพง ~9.15m หน้าบอลในแนวสู่ประตู + GK เฝ้าเสา + แนวรับ
+  const aGK = away.find((p) => p.role === 'GK');
+  if (aGK) { aGK.x = PITCH.length - 2.5; aGK.y = 33; aGK.targetX = aGK.x; aGK.targetY = aGK.y; aGK.pathHistory = []; }
+  const goalDir = { x: PITCH.length - fk.x, y: 34 - fk.y };
+  const glen = Math.hypot(goalDir.x, goalDir.y) || 1;
+  const wallX = fk.x + (goalDir.x / glen) * 9.15;
+  const wallY = fk.y + (goalDir.y / glen) * 9.15;
+  const aRest = away.filter((p) => p.role !== 'GK');
+  aRest.forEach((p, i) => {
+    let x, y;
+    if (i < 4) { x = wallX; y = wallY + (i - 1.5) * 1.0; } // กำแพง 4 คน
+    else { x = PITCH.length - 10 - (i - 4) * 2; y = 26 + (i - 4) * 4; } // แนวรับในกรอบ
+    p.x = x; p.y = y; p.targetX = x; p.targetY = y;
+    p.intendedTarget = null; p.runType = null; p.runTarget = null; p.pathHistory = [];
+  });
+
+  state.ball.x = taker.x;
+  state.ball.y = taker.y;
+  giveBall(state, taker);
+  state.setPiece = { type: 'freeKick', takerId: taker.id, deliverTick: 5 };
+  state.pendingPenalty = null;
+
+  state.assistant = {
+    messages: [{
+      severity: 'info',
+      text: 'จัดฟรีคิกระยะยิงแล้ว — คนเตะจะ "ยิงตรง" เพราะได้ระยะ (ลากออกไปไกล/มุมแคบจะเปลี่ยนเป็นเปิดเข้ากรอบแทน) กด Play เพื่อดูผล',
     }],
     ghosts: [],
   };
