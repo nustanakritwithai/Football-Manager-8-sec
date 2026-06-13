@@ -121,6 +121,8 @@ button:hover:not(:disabled) { background: #2c3547; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-sm { font-size: 12px; padding: 5px 10px; }
 .btn-sm.active { background: var(--accent); border-color: var(--accent); }
+.penalty-card { border: 1px solid var(--danger); }
+.penalty-card h3 { color: var(--danger); }
 
 .btn-play {
   width: 100%;

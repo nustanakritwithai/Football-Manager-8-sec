@@ -32,6 +32,7 @@ export function serialize(state) {
     ball: { ...state.ball },
     tacticalScores: state.tacticalScores ? { ...state.tacticalScores } : null,
     history: state.history.slice(-10),
+    passModel: state.passModel ? { ...state.passModel } : null,
   };
 }
 
@@ -91,6 +92,10 @@ export function applySave(state, data) {
   state.lastTurnStats = { passes: 0, carries: 0, dribbles: 0, runs: 0 };
   state.replayLog = [];
   state.ui.preview = null;
+  state.pendingPenalty = null;
+  state.passSamples = [];
+  state.passModel = (data.passModel && Array.isArray(data.passModel.w)) ? data.passModel : null;
+  state.ui.whatIf = false;
 
   Object.assign(state.ball, data.ball);
   state.tacticalScores = data.tacticalScores || null;

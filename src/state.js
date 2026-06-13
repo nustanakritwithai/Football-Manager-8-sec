@@ -27,6 +27,10 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     passMemory: { lastPasserId: null, lastReceiverId: null, recentPasses: [] },
     lastTurnStats: { passes: 0, carries: 0, dribbles: 0, runs: 0 },
     replayLog: [], // P3: dataset ต่อเทิร์นสำหรับ export ไปฝึกโมเดลภายหลัง
+    // P5: ระบบจาก backlog วิจัย
+    pendingPenalty: null,   // { team, takerId } รอผู้เล่นเลือกมุม
+    passSamples: [],        // ตัวอย่างการจ่ายบอล (features + สำเร็จ/พลาด) ไว้ฝึกโมเดล
+    passModel: null,        // logistic regression ที่ฝึกแล้ว { w, b, acc, n }
     lastTurnEvents: [],
     assistant: { messages: [], ghosts: [] },
     history: [],

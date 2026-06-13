@@ -58,9 +58,22 @@
           <button id="btnApplyGhosts" class="btn-sm">✅ ใช้คำแนะนำ AI</button>
           <button id="btnCorner" class="btn-sm">⚽ ซ้อมเตะมุม</button>
           <button id="btnSpaceMap" class="btn-sm">🗺 Space Control</button>
+          <button id="btnWhatIf" class="btn-sm">⏪ What-if เทิร์นที่แล้ว</button>
+          <button id="btnFog" class="btn-sm">🌫 Fog of War</button>
+          <button id="btnTrain" class="btn-sm">🧠 Train Pass Model</button>
         </div>
         <div id="previewSummary" class="muted" style="margin-top:6px;font-size:12px"></div>
         <div id="spaceShare" class="muted" style="margin-top:4px;font-size:12px"></div>
+      </section>
+
+      <section class="card penalty-card" id="penaltyCard" style="display:none">
+        <h3>⚡ Penalty!</h3>
+        <div id="penaltyInfo" style="margin-bottom:8px;font-size:13px"></div>
+        <div class="row">
+          <button class="btn-sm" data-dir="left">⬅ ซ้าย</button>
+          <button class="btn-sm" data-dir="center">⏺ กลาง</button>
+          <button class="btn-sm" data-dir="right">➡ ขวา</button>
+        </div>
       </section>
 
       <section class="card">

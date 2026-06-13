@@ -6,7 +6,7 @@ import { startSimulation, simTick } from './simulation.js';
 
 // คืน { paths, ballPath, summary } หรือ null ถ้า preview ไม่ได้
 export function runPreview(state) {
-  if (state.phase !== 'planning') return null;
+  if (state.phase !== 'planning' || state.pendingPenalty) return null;
 
   let copy;
   try {
