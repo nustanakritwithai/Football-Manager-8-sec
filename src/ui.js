@@ -158,9 +158,18 @@ export function updateDashboard(state) {
   els.phase.className = `phase phase-${state.ui.whatIf ? 'simulating' : state.phase}`;
 
   if (els.teamPhase) {
-    els.teamPhase.textContent = DEBUG.showPhase
+    let txt = DEBUG.showPhase
       ? `ทีมเรา: ${state.teamPhases?.home ?? '–'} · ${state.teamObjectives?.home ?? '–'}`
       : '';
+    // P2.8: สถานะการเล่น + restart ที่รออยู่
+    if (state.restart) {
+      const labels = { kickoff: 'Kick-off', throwIn: 'Throw-in', goalKick: 'Goal kick', corner: 'Corner', freeKick: 'Free kick', penalty: 'Penalty' };
+      const who = state.restart.team === 'home' ? 'เรา' : 'คู่แข่ง';
+      txt += `${txt ? ' · ' : ''}⚑ Restart: ${labels[state.restart.type] || state.restart.type} → ${who}`;
+    } else if (state.playState && state.playState !== 'live') {
+      txt += `${txt ? ' · ' : ''}${state.playState}`;
+    }
+    els.teamPhase.textContent = txt;
   }
 
   const busy = state.phase === 'simulating';
@@ -247,6 +256,9 @@ export function updateDashboard(state) {
     const li = document.createElement('li');
     li.textContent = e;
     if (e.startsWith('GOAL')) li.className = 'ev-goal';
+    else if (e.includes('PENALTY') || e.includes('Penalty')) li.className = 'ev-penalty';
+    else if (e.includes('Corner to') || e.includes('Goal kick to') || e.includes('Throw-in to')) li.className = 'ev-restart';
+    else if (e.startsWith('Free kick') || e.includes('Foul') || e.includes('Yellow card')) li.className = 'ev-foul';
     els.eventList.appendChild(li);
   }
   if (!events.length) {
@@ -323,7 +335,33 @@ export function drawOverlays(ctx, state) {
   drawSecondBallZone(ctx, state);
   drawLooseBallPulse(ctx, state);
   drawBallFxLabel(ctx, state);
+  // P2.8: restart marker
+  drawRestartMarker(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P2.8: จุด restart ที่รอเล่น (corner/free kick/throw-in/...) ตอน planning
+function drawRestartMarker(ctx, state) {
+  const r = state.restart;
+  if (!r || state.phase !== 'planning') return;
+  const px = toPx(r.spot.x), py = toPy(r.spot.y);
+  const col = r.team === 'home' ? COLORS.home : COLORS.away;
+  ctx.beginPath();
+  ctx.arc(px, py, 7, 0, Math.PI * 2);
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(px, py, 2, 0, Math.PI * 2);
+  ctx.fillStyle = col;
+  ctx.fill();
+  const labels = { kickoff: 'Kick-off', throwIn: 'Throw-in', goalKick: 'Goal kick', corner: 'Corner', freeKick: 'Free kick', penalty: 'Penalty' };
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(labels[r.type] || r.type, px, py - 12);
 }
 
 // P2.7: เส้น trail ของบอลตอนยิง/จ่าย/เด้ง

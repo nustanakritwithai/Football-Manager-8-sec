@@ -267,6 +267,34 @@ export function generateAdvice(state, analysis, events, prevScores) {
     });
   }
 
+  // --- P2.8: set piece / foul / restart ---
+  if (flags.pendingRestart && flags.pendingRestart.team === 'home') {
+    const tips = {
+      corner: 'ได้เตะมุม — ดัน CB ตัวสูงกับ ST เข้า box เปิดเสาไกล/เสาใกล้ และเก็บ DM ไว้คุม second ball หน้ากรอบ',
+      freeKick: 'ได้ฟรีคิก — ถ้าใกล้กรอบลองยิงตรงหรือเปิดเข้า box, ถ้าไกลจ่ายสั้นตั้งเกมแล้วค่อยเจาะ',
+      goalKick: 'ลูกตั้งเตะจากประตู — ถ้าคู่แข่งกดสูงให้เปิดยาวหา ST/ปีก, ถ้าไม่กดเล่นสั้นออกจากกรอบ',
+      throwIn: 'ทุ่มเข้าเล่น — หาตัวรับใกล้ริมเส้นแล้วต่อบอลเร็ว อย่าทุ่มเข้ากลางที่คู่แข่งคุมอยู่',
+      penalty: 'ได้จุดโทษ! เลือกมุมยิงให้เด็ดขาด',
+    };
+    candidates.push({ priority: 86, severity: 'good', text: tips[flags.pendingRestart.type] || 'เริ่มเล่นลูกตั้งเตะ' });
+  }
+  if (flags.concededPenalty) {
+    candidates.push({ priority: 95, severity: 'danger', text: 'เสียจุดโทษจากการฟาวล์ในกรอบ — ระวังการเข้าปะทะในเขตโทษ อย่าเสียบสุ่มเสี่ยงเมื่อยังคุมตำแหน่งได้' });
+  }
+  if (flags.concededCornerShot) {
+    candidates.push({ priority: 79, severity: 'danger', text: 'เสียเตะมุมแล้วโดนยิงต่อ — ตั้งรับ corner ไม่มีคนคุมเสาไกล/หน้ากรอบ จัดคนมาร์กตัวสูงและคุม zone หน้าประตูให้ครบ' });
+  } else if (flags.concededCorner) {
+    candidates.push({ priority: 58, severity: 'warn', text: 'เสียเตะมุมบ่อย — เช็ก rest defence ตอนเปิดเกมรุก อย่าให้ fullback โดนเจาะจนต้องสกัดออกหลัง' });
+  }
+  if (flags.cornerCreatedShot) {
+    candidates.push({ priority: 44, severity: 'good', text: 'เตะมุมของเราสร้างโอกาสยิงได้ — แพตเทิร์นเติมคนเข้า box กำลังได้ผล รักษาไว้' });
+  }
+  if (flags.foulProne) {
+    candidates.push({ priority: 64, severity: 'warn', text: 'ทีมเราเสียฟาวล์เยอะ เสี่ยงใบเหลือง/ฟรีคิกอันตราย — ลดการเข้าปะทะแบบสุ่มเสี่ยง เน้นยืนตำแหน่งปิดพื้นที่แทนการเสียบ' });
+  } else if (flags.gotFreeKick || flags.gotPenalty) {
+    candidates.push({ priority: 41, severity: 'info', text: 'ได้ลูกตั้งเตะในแดนคู่แข่ง — ใช้จังหวะ set piece ให้เป็นโอกาสจบสกอร์ ดันตัวเป้าเข้ากรอบก่อนเล่น' });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;

@@ -41,7 +41,37 @@ export function analyze(state) {
   // P2.7: ตรวจจังหวะบอลกระเด็น / second ball / first touch
   detectBallPhysicsIssues(state, flags);
 
+  // P2.8: ตรวจ set piece / foul / restart
+  detectMatchRuleIssues(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2.8: set piece / foul detections (มุมมองทีมเรา = home) ----------
+
+function detectMatchRuleIssues(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const has = (sub) => events.some((e) => e.includes(sub));
+
+  flags.wonCorner = has('Corner to Home');
+  flags.concededCorner = has('Corner to Away');
+  // เสีย corner แล้วโดนยิงต่อ = ตั้งรับ set piece ไม่ดี
+  flags.concededCornerShot = flags.concededCorner && has('Shot chance! Their');
+  // ได้ corner แล้วได้ยิง = set piece รุกได้ผล
+  flags.cornerCreatedShot = flags.wonCorner && has('Shot chance! Our');
+
+  flags.gotPenalty = has('Penalty to Home') || (has('Foul in the box by their'));
+  flags.concededPenalty = has('Penalty to Away') || (has('Foul in the box by our'));
+  flags.gotFreeKick = events.some((e) => e.startsWith('Free kick') && e.includes('their'));
+  flags.concededFreeKick = events.some((e) => e.startsWith('Free kick') && e.includes('our'));
+  flags.ourYellowCard = events.some((e) => e.startsWith('Yellow card for our'));
+
+  // วินัย: ฟาวล์สะสมของเราเยอะกว่าคู่แข่งชัดเจน
+  const f = state.foulCount || { home: 0, away: 0 };
+  flags.foulProne = f.home >= 4 && f.home - f.away >= 3;
+
+  // restart ที่กำลังรอเล่น (ใช้แนะนำ set piece)
+  flags.pendingRestart = state.restart ? { type: state.restart.type, team: state.restart.team } : null;
 }
 
 // ---------- P2.7: ball physics detections (มุมมองทีมเรา) ----------

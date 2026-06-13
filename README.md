@@ -188,6 +188,15 @@ save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อ
   แล้วเกิด **second ball contest** — ใครยืนตำแหน่งดี/หันเข้าหาบอล/สดกว่า เก็บตกได้ก่อน
   (randomness ถูกคุมด้วยบริบท: ความเร็วบอล, pressure, positioning, stamina ไม่ใช่ pinball)
   AI Assistant เตือนเรื่อง rebound, second ball, first touch, deflection ในแดนหลัง
+- **🏟 Match Rules & Restart (P2.8)** — เกมเป็น "แมตช์จริง" แบบ turn-based:
+  นับสกอร์เมื่อบอลข้ามเส้นประตูระหว่างเสา, บอลออก → throw-in / goal kick / corner
+  (ตัดสินจาก lastTouchTeam), ฟาวล์จาก context (tackle/pressure/aggression/stamina/discipline)
+  → free kick นอกกรอบ / penalty ในกรอบ, ใบเหลืองเบื้องต้น, advantage แบบ simplified
+  **เมื่อบอลตายกลางเทิร์น (goal/out/foul) simulation หยุดทันที** ไม่เล่นต่อจนครบ 8 วิ →
+  เข้า dead ball แล้วกด Play เพื่อ execute restart ตามกติกา (kickoff/corner/free kick/penalty
+  auto-resolve), clock เดินเฉพาะวินาทีที่บอล live, scoreboard/overlay แสดง playState + restart spot
+  และ AI Assistant แนะนำ set piece + เตือนเสีย corner/ฟาวล์หน้าเขตโทษ
+  (MVP — ยังไม่ทำ offside / VAR / ไล่ผู้เล่นออกจากใบแดง / set-piece play ละเอียด)
 
 ## การทดสอบ
 
@@ -197,6 +206,7 @@ node tests/p3-tools.mjs        # preview, adjust, corner, retrieval, dataset
 node tests/p5-research.mjs     # penalty, learning, what-if, fog of war
 node tests/p26-finishing.mjs   # must-shoot, cutback, no wild shots, shot volume, cross
 node tests/p27-ball-physics.mjs # rolling, bounce, deflection, first touch, rebound, second ball
+node tests/p28-match-rules.mjs # goal/ball-out, restart exec, foul, dead-ball stop, save/load
 ```
 
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime

@@ -19,6 +19,12 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     players: [...home.players, ...away.players],
     ball: createBall(),
     possessionTeam: 'home',
+    // P2.8: match rules & restart state
+    playState: 'live',     // live | deadBall | setPiece | goalCelebration | finished
+    restart: null,         // { type, team, spot, side, reason, takerId, createdAtClock }
+    structuredEvents: [],   // เหตุการณ์แบบ structured ของเทิร์นล่าสุด
+    foulCount: { home: 0, away: 0 },
+    cards: { yellow: [], red: [] },
     tacticalScores: null,
     prevScores: null,
     // P2: tactical intelligence
@@ -68,6 +74,12 @@ export function kickoff(state, team) {
 export function recordEvent(state, text) {
   if (state.lastTurnEvents.length >= MAX_EVENTS_PER_TURN) return;
   state.lastTurnEvents.push(text);
+}
+
+// P2.8: เก็บเหตุการณ์แบบ structured คู่กับ string event (ไว้ให้ UI/analyzer ใช้)
+export function recordStructuredEvent(state, ev) {
+  if (!Array.isArray(state.structuredEvents)) state.structuredEvents = [];
+  state.structuredEvents.push({ clock: Math.round(state.clock), ...ev });
 }
 
 // เปลี่ยน formation ของทีมเรา (ใช้ตอน planning) — จัดตำแหน่งใหม่ตาม preset

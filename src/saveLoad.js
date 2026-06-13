@@ -31,6 +31,11 @@ export function serialize(state) {
       commandType: p.commandType ?? null,
     })),
     ball: { ...state.ball },
+    // P2.8: match rules & restart
+    playState: state.playState ?? 'live',
+    restart: state.restart ? { ...state.restart } : null,
+    foulCount: state.foulCount ? { ...state.foulCount } : { home: 0, away: 0 },
+    cards: state.cards ? { yellow: [...state.cards.yellow], red: [...state.cards.red] } : { yellow: [], red: [] },
     tacticalScores: state.tacticalScores ? { ...state.tacticalScores } : null,
     history: state.history.slice(-10),
     passModel: state.passModel ? { ...state.passModel } : null,
@@ -101,6 +106,12 @@ export function applySave(state, data) {
   Object.assign(state.ball, data.ball);
   // P2.7: save เก่าที่ยังไม่มี z/velocityZ/spin/ballMode → เติม default กัน crash
   ensureBallPhysics(state.ball);
+  // P2.8: save เก่าที่ยังไม่มี match-rule state → เติม default (รวมถึง restore ตอน dead ball)
+  state.playState = data.playState ?? 'live';
+  state.restart = data.restart ?? null;
+  state.foulCount = data.foulCount ?? { home: 0, away: 0 };
+  state.cards = data.cards ?? { yellow: [], red: [] };
+  state.structuredEvents = [];
   state.tacticalScores = data.tacticalScores || null;
   state.history = Array.isArray(data.history) ? data.history.slice(-10) : [];
   state.lastTurnEvents = [];

@@ -95,3 +95,17 @@ export const GK_PARRY_CENTER_CHANCE = 0.3;   // โอกาสปัดไป�
 export const SECOND_BALL_RADIUS = 18;        // รัศมีพิจารณาการแย่ง second ball (เมตร)
 export const FIRST_TOUCH_LOOSE = 0.2;        // first touch ต่ำกว่านี้ = บอลหลุดเป็น loose
 export const FIRST_TOUCH_CLEAN = 0.36;       // สูงกว่านี้ = รับเรียบทันที (ลูกง่ายต้องรับได้)
+
+// ---------- P2.8: Match Rules & Restart System ----------
+export const GOAL_WIDTH = 7.32;              // เมตร
+export const GOAL_HALF_WIDTH = 3.66;         // ระยะจากกลางประตูถึงเสาแต่ละข้าง
+export const CROSSBAR_HEIGHT = 2.44;         // ความสูงคาน (ใช้กับ z ตอนเช็กประตู)
+export const PENALTY_AREA_DEPTH = 16.5;      // เขตโทษลึก
+export const PENALTY_AREA_HALF_WIDTH = 20.15; // ครึ่งความกว้างเขตโทษ
+export const PENALTY_SPOT_DISTANCE = 11;     // จุดโทษห่างเส้นประตู
+export const SIX_YARD_DEPTH = 5.5;           // กรอบ 6 หลา
+export const RESTART_DISTANCE = 9.15;        // ระยะคู่แข่งต้องถอยตอน set piece
+export const FOUL_BASE_RATE = 0.05;          // อัตราฟาวล์พื้นฐานต่อจังหวะ tackle/press
+export const FOUL_PRESSURE_WEIGHT = 0.12;    // น้ำหนัก pressure ต่อโอกาสฟาวล์
+export const YELLOW_CARD_THRESHOLD = 0.62;   // foulSeverity เกินนี้ = ใบเหลือง
+export const ADVANTAGE_SECONDS = 2.0;        // ได้เปรียบหลังฟาวล์ก่อนดึงกลับมาเป็นฟรีคิก

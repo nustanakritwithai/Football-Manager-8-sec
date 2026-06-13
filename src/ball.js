@@ -112,6 +112,27 @@ export function createRebound(state, fromX, fromY, vx, vy, vz = 0) {
   makeLoose(state, vx, vy, vz, 'rebound');
 }
 
+// P2.8: บันทึกผู้สัมผัสบอลล่าสุด (ใช้ตัดสิน throw-in/goal kick/corner)
+export function markLastTouch(ball, player) {
+  ball.lastTouchPlayerId = player.id;
+  ball.lastTouchTeam = player.team;
+}
+
+// P2.8: วางบอลนิ่งที่จุด restart แล้วหยุดความเร็วทั้งหมด
+export function placeBallAtRestartSpot(ball, x, y) {
+  ball.x = x;
+  ball.y = y;
+  ball.z = 0;
+  ball.velocityX = 0;
+  ball.velocityY = 0;
+  ball.velocityZ = 0;
+  ball.spin = 0;
+  ball.inFlight = false;
+  ball.isLoose = false;
+  ball.ballMode = 'owned';
+  ball.trail = [];
+}
+
 // ---------- physics primitives (pure: ทำงานกับ ball object เท่านั้น) ----------
 
 export function applyBallGravity(b, dt = TICK_DT) {
