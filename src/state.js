@@ -18,6 +18,9 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     score: { home: 0, away: 0 },
     teams: { home: home.team, away: away.team },
     players: [...home.players, ...away.players],
+    benches: { home: home.bench, away: away.bench }, // ตัวสำรอง (นอกสนาม ไม่ถูกจำลอง)
+    subsUsed: { home: 0, away: 0 },
+    subsMax: 5,
     ball: createBall(),
     possessionTeam: 'home',
     // P2.8: match rules & restart state

@@ -19,6 +19,7 @@ import { isOpponentVisible } from './ui.js';
 import { deepClone } from './utils.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { giveBall } from './ball.js';
+import { initTactics, openTactics } from './tactics.js';
 import {
   initAudio, unlockAudio, toggleSound, isSoundOn,
   playWhistle, playCheer, playKick, playSave, playPost, playOoh,
@@ -93,6 +94,15 @@ initInput(
   () => { clearPreview(); updateDashboard(state); },
   (p) => setStatus(`${p.role} #${p.number} วิ่งไม่ถึงจุดนั้นใน 8 วิ — จำกัดเป้าหมายตามรัศมีให้แล้ว`),
 );
+
+// P3.0: หน้าปรับแผน (Tactics modal) — แก้ base position + เปลี่ยนตัว
+initTactics(state, {
+  onClose() { clearPreview(); state.ui.scoresDirty = true; updateDashboard(state); },
+});
+document.getElementById('btnTactics').addEventListener('click', () => {
+  if (state.phase === 'simulating') { setStatus('ปรับแผนระหว่างจำลองไม่ได้ — รอจบเทิร์น', true); return; }
+  openTactics();
+});
 
 initUI(state, {
   onPlay() {
