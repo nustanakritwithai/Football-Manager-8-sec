@@ -16,11 +16,14 @@ import { recordEvent, kickoff, isMatchOver } from './state.js';
 import { analyze } from './tacticalAnalyzer.js';
 import { generateAdvice } from './aiAssistant.js';
 import { epvGain, epvValue } from './pitchControl.js';
+import { awardPenalty } from './penalty.js';
+import { collectPassSample, predictPass } from './learning.js';
 
 // ---------- เริ่ม / จบ เทิร์น ----------
 
 export function startSimulation(state) {
   if (state.phase !== 'planning') return false;
+  if (state.pendingPenalty) return false; // ต้องตัดสินจุดโทษก่อน
 
   // ล็อกคำสั่ง: intended target (clamp ตาม radius อีกรอบ) → targetX/Y ของเทิร์นนี้
   for (const p of state.players) {
@@ -87,7 +90,7 @@ export function simTick(state) {
     }
   }
 
-  if (sim.tick >= TICKS_PER_TURN) {
+  if (sim.tick >= TICKS_PER_TURN || sim.forceEnd) {
     finishSimulation(state);
     return true;
   }
@@ -112,6 +115,18 @@ function finishSimulation(state) {
   state.tacticalScores = analysis.scores;
   const advice = generateAdvice(state, analysis, state.lastTurnEvents, state.prevScores);
   state.assistant = advice;
+
+  // P5: Ghost defender replay — เทิร์นที่โดนเจาะ ชี้กองหลังที่หลุดแนวมากสุด
+  addGhostReplay(state, advice);
+
+  if (state.pendingPenalty) {
+    advice.messages.unshift({
+      severity: 'danger',
+      text: state.pendingPenalty.team === 'home'
+        ? 'จุดโทษของเรา! เลือกมุมยิงในการ์ด Penalty ก่อนเล่นต่อ'
+        : 'คู่แข่งได้จุดโทษ! เลือกทางพุ่งของ GK ในการ์ด Penalty ก่อนเล่นต่อ',
+    });
+  }
 
   state.history.push({
     turnNumber: state.turn,
@@ -162,6 +177,50 @@ function finishSimulation(state) {
       severity: 'info',
     });
   }
+}
+
+// P5: ตำแหน่ง "ที่ควรยืน" ของกองหลังตามวินัยแนวรับ (ghosting แบบ Le/Carr)
+export function defensiveIdealFor(state, p) {
+  if (!['CB', 'LB', 'RB', 'DM'].includes(p.role)) return null;
+  const b = state.ball;
+  const dir = attackDir(p.team);
+  const team = state.teams[p.team];
+  const ownGoalX = p.team === 'home' ? 0 : PITCH.length;
+  const lineDepth = 12 + team.defensiveLine * 4;
+  const ballPull = clamp((b.x - PITCH.length / 2) * dir, -20, 20);
+  const lineX = ownGoalX + dir * clamp(lineDepth + ballPull * 0.45, 8, 48);
+  const y = clamp(lerp(p.baseY, 34, 0.15) + (b.y - 34) * 0.18, 2, PITCH.width - 2);
+  return { x: clamp(lineX, 2, PITCH.length - 2), y };
+}
+
+function addGhostReplay(state, advice) {
+  const danger = state.lastTurnEvents.some(
+    (e) => (e.includes('Shot chance') && e.includes('Their'))
+      || e.startsWith('PENALTY to them')
+      || (e.startsWith('GOAL') && e.includes(state.teams.away.teamName))
+  );
+  if (!danger) return;
+
+  let worst = null;
+  for (const p of teamPlayers(state, 'home')) {
+    const ideal = defensiveIdealFor(state, p);
+    if (!ideal) continue;
+    const dev = dist(p.x, p.y, ideal.x, ideal.y);
+    if (dev > 9 && (!worst || dev > worst.dev)) worst = { p, ideal, dev };
+  }
+  if (!worst) return;
+
+  advice.ghosts.push({
+    playerId: worst.p.id,
+    x: worst.ideal.x,
+    y: worst.ideal.y,
+    label: 'แนวที่ควรยืน',
+  });
+  advice.messages.push({
+    severity: 'warn',
+    text: `Ghost replay: ตอนโดนเจาะ ${worst.p.role} (#${worst.p.number}) อยู่ห่างจากแนวที่ควรยืน ${Math.round(worst.dev)} เมตร — วง ghost คือตำแหน่งอ้างอิงตามวินัยแนวรับ`,
+  });
+  if (advice.messages.length > 4) advice.messages.length = 4;
 }
 
 function snapshotPositions(state) {
@@ -343,6 +402,7 @@ function updateBall(state) {
     for (const p of state.players) {
       if (p.team === b.lastTouchTeam) continue;
       if (distP(p, b) < 1.2 && Math.random() < 0.16 + p.positioning / 300) {
+        labelPendingPass(state, 0);
         giveBall(state, p);
         recordEvent(state, `Interception by ${p.team === 'home' ? 'our' : 'their'} ${p.role} (#${p.number})`);
         noteTurnover(state, p.team);
@@ -389,6 +449,7 @@ function resolvePassArrival(state) {
   }
   if (nearest && best < 3.0) {
     const sameTeam = nearest.team === b.lastTouchTeam;
+    labelPendingPass(state, sameTeam ? 1 : 0);
     giveBall(state, nearest);
     if (sameTeam) {
       state.sim.stats[nearest.team].passes++;
@@ -399,10 +460,19 @@ function resolvePassArrival(state) {
       noteTurnover(state, nearest.team);
     }
   } else {
+    labelPendingPass(state, 0);
     b.isLoose = true;
     recordEvent(state, 'Pass failed — ball loose');
   }
   state.sim.pendingPass = null;
+}
+
+// เก็บตัวอย่างการจ่ายของทีมเราไว้ฝึก pass model (P5)
+function labelPendingPass(state, label) {
+  const pending = state.sim?.pendingPass;
+  if (!pending?.features) return;
+  const passer = getPlayer(state, pending.fromId);
+  if (passer?.team === 'home') collectPassSample(state, pending.features, label);
 }
 
 function updatePassMemory(state, receiver) {
@@ -732,12 +802,28 @@ export function passOptions(state, owner, pressure = 0) {
     // EPV: การจ่ายที่ดีคือจ่ายไปยังตำแหน่งที่ "มีมูลค่า" มากขึ้น ไม่ใช่แค่ไปข้างหน้า
     const valueGain = epvGain(owner.x, owner.y, aimX, aimY, owner.team);
 
+    // feature vector สำหรับเก็บ sample / โมเดลที่ฝึกจากเกมจริง (ทุกตัว ~0..1)
+    const features = [
+      laneSafety,
+      space,
+      (forward + 1) / 2,
+      distFit,
+      clamp(valueGain * 2 + 0.5, 0, 1),
+      clamp(d / 40, 0, 1),
+      clamp(pressure / 3, 0, 1),
+    ];
+
     let score =
       laneSafety * 0.4 +
       space * 0.2 +
       forward * 0.12 * (1 + (team.riskLevel - 3) * 0.12) +
       distFit * 0.14 +
       clamp(valueGain * 1.4, -0.12, 0.28);
+
+    // ถ้าผู้เล่นฝึกโมเดลจาก dataset แล้ว ใช้ความเห็นโมเดลถ่วงเพิ่ม
+    if (state.passModel) {
+      score += (predictPass(state.passModel, features) - 0.5) * 0.25;
+    }
 
     // objective fit: จ่ายไปฝั่ง/พื้นที่ที่ทีมต้องการ
     if (objective === 'progressLeft' && mate.y < owner.y - 3) score += 0.08;
@@ -757,7 +843,7 @@ export function passOptions(state, owner, pressure = 0) {
     if (mem && mate.id === mem.lastPasserId && owner.id === mem.lastReceiverId) score -= 0.2;
     if (forward < -0.2 && objective !== 'buildUp' && objective !== 'holdPossession' && pressure < 1.2) score -= 0.08;
 
-    options.push({ mate, score, d, laneSafety, forward, aimX, aimY, runner: !!runner });
+    options.push({ mate, score, d, laneSafety, forward, aimX, aimY, runner: !!runner, features });
   }
 
   options.sort((a, b) => b.score - a.score);
@@ -769,7 +855,7 @@ function executePass(state, owner, option, pressure) {
     (1 - owner.passing / 130) * (option.d / 22) * (1 + pressure * 0.6) * rand(0, 4.5);
   const ang = rand(0, Math.PI * 2);
   const lead = attackDir(owner.team) * clamp(option.d * 0.08, 0, 2.5);
-  state.sim.pendingPass = { fromId: owner.id, startX: state.ball.x };
+  state.sim.pendingPass = { fromId: owner.id, startX: state.ball.x, features: option.features ?? null };
   startPass(state, owner,
     option.aimX + lead + Math.cos(ang) * errMag,
     option.aimY + Math.sin(ang) * errMag);
@@ -886,6 +972,13 @@ function resolveDribbleContest(state, p) {
   if (Math.random() < 0.35 + skill * 0.45 - defense * 0.25) {
     recordEvent(state, `${p.team === 'home' ? 'Our' : 'Their'} ${p.role} beat his marker on the dribble`);
   } else {
+    // โดนเสียบในกรอบเขตโทษคู่แข่ง → มีโอกาสเป็นจุดโทษ (P5)
+    const boxX = attackDir(p.team) === 1 ? p.x > PITCH.length - 16.5 : p.x < 16.5;
+    const inBox = boxX && p.y > 34 - 20.15 && p.y < 34 + 20.15;
+    if (inBox && Math.random() < 0.3 && awardPenalty(state, p.team, p.id)) {
+      sim.carrierMove.delete(p.id);
+      return;
+    }
     makeLoose(state, (def.x - p.x) * 2, (def.y - p.y) * 2);
     state.ball.lastTouchTeam = p.team;
     sim.carrierMove.delete(p.id);

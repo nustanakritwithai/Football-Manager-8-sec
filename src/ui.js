@@ -27,7 +27,9 @@ export function initUI(state, handlers) {
     'clock', 'turn', 'phase', 'scoreline', 'awayStyle', 'teamPhase',
     'btnPlay', 'btnReset', 'btnSave', 'btnLoad', 'btnExport', 'btnImport', 'btnClearPaths',
     'btnPreview', 'btnAdjust', 'btnApplyGhosts', 'btnCorner', 'btnExportDataset',
-    'btnSpaceMap', 'previewSummary', 'xgRow', 'spaceShare',
+    'btnSpaceMap', 'btnFog', 'btnWhatIf', 'btnTrain',
+    'penaltyCard', 'penaltyInfo',
+    'previewSummary', 'xgRow', 'spaceShare',
     'importFile', 'simSpeed', 'formation', 'scoreBars', 'assistantBox', 'eventList',
     'playerInfo', 'tooltip', 'statusMsg', 'historyList',
     'pressingLevel', 'defensiveLine', 'attackingWidth', 'passingStyle', 'tempo', 'riskLevel',
@@ -107,6 +109,19 @@ export function initUI(state, handlers) {
     els.btnSpaceMap.classList.toggle('active', state.ui.showControl);
   });
 
+  // P5: fog of war toggle / what-if / train model
+  els.btnFog.addEventListener('click', () => {
+    state.ui.fogOfWar = !state.ui.fogOfWar;
+    els.btnFog.classList.toggle('active', state.ui.fogOfWar);
+  });
+  els.btnWhatIf.addEventListener('click', handlers.onWhatIf);
+  els.btnTrain.addEventListener('click', handlers.onTrain);
+
+  // P5: penalty mini-game
+  for (const btn of els.penaltyCard.querySelectorAll('[data-dir]')) {
+    btn.addEventListener('click', () => handlers.onPenalty(btn.dataset.dir));
+  }
+
   // xG bars
   for (const side of ['home', 'away']) {
     const row = document.createElement('div');
@@ -137,8 +152,10 @@ export function updateDashboard(state) {
   els.awayStyle.textContent = `คู่แข่ง: ${state.teams.away.strategy}`;
 
   const phaseLabel = { planning: 'Planning', simulating: 'Simulating…', finished: 'Match Finished' };
-  els.phase.textContent = phaseLabel[state.phase] || state.phase;
-  els.phase.className = `phase phase-${state.phase}`;
+  els.phase.textContent = state.ui.whatIf
+    ? 'WHAT-IF (ไม่กระทบแมตช์จริง)'
+    : (phaseLabel[state.phase] || state.phase);
+  els.phase.className = `phase phase-${state.ui.whatIf ? 'simulating' : state.phase}`;
 
   if (els.teamPhase) {
     els.teamPhase.textContent = DEBUG.showPhase
@@ -147,15 +164,32 @@ export function updateDashboard(state) {
   }
 
   const busy = state.phase === 'simulating';
-  els.btnPlay.disabled = busy || state.phase === 'finished';
+  const pen = !!state.pendingPenalty;
+  els.btnPlay.disabled = busy || pen || state.phase === 'finished';
   els.btnPlay.textContent = state.phase === 'finished'
     ? 'จบแมตช์แล้ว'
+    : pen ? 'รอตัดสินจุดโทษ…'
     : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…` : `▶ Play Next ${TURN_SECONDS} Seconds`;
   for (const b of [
-    els.btnReset, els.btnSave, els.btnLoad, els.btnExport, els.btnImport, els.formation,
-    els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner,
+    els.btnReset, els.btnExport, els.btnImport, els.formation,
+    els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner, els.btnWhatIf, els.btnTrain,
   ]) {
-    b.disabled = busy;
+    b.disabled = busy || pen;
+  }
+  // save/load ปิดระหว่าง simulation และระหว่างอยู่ในโหมด what-if
+  for (const b of [els.btnSave, els.btnLoad]) b.disabled = busy || state.ui.whatIf;
+  els.btnWhatIf.textContent = state.ui.whatIf ? '⏪ ออกจาก What-if' : '⏪ What-if เทิร์นที่แล้ว';
+  els.btnWhatIf.classList.toggle('active', !!state.ui.whatIf);
+  els.btnTrain.textContent = state.passModel
+    ? `🧠 Train Pass Model (acc ${(state.passModel.acc * 100).toFixed(0)}%)`
+    : `🧠 Train Pass Model (${state.passSamples?.length ?? 0} ตัวอย่าง)`;
+
+  // penalty card
+  els.penaltyCard.style.display = pen ? 'block' : 'none';
+  if (pen) {
+    els.penaltyInfo.textContent = state.pendingPenalty.team === 'home'
+      ? '⚽ จุดโทษของเรา! เลือกมุมยิง — GK คู่แข่งจะเดาทางแบบ mixed strategy'
+      : '🧤 คู่แข่งได้จุดโทษ! เลือกทางพุ่งของผู้รักษาประตูคุณ';
   }
 
   // xG / shot probability
@@ -269,17 +303,72 @@ function getControlCached(state) {
 }
 
 export function drawOverlays(ctx, state) {
+  updateFog(state);
   drawControlMap(ctx, state);
   drawDangerZones(ctx, state);
   drawCongestion(ctx, state);
   drawPreview(ctx, state);
-  for (const p of state.players) drawPlayerPath(ctx, p);
+  for (const p of state.players) {
+    if (state.ui.fogOfWar && p.team === 'away' && !isOpponentVisible(state, p)) continue;
+    drawPlayerPath(ctx, p);
+  }
+  drawFogGhosts(ctx, state);
   drawPassingLanes(ctx, state);
   drawPressureCircle(ctx, state);
   drawIntents(ctx, state);
   drawRunArrows(ctx, state);
   drawCarrierAction(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P5: Fog of War — เห็นคู่แข่งเฉพาะที่อยู่ใกล้นักเตะเรา/บอล (แนว Graph Imputer)
+const FOG_SIGHT_RADIUS = 20; // เมตร
+
+export function isOpponentVisible(state, p) {
+  if (p.team !== 'away') return true;
+  if (Math.hypot(p.x - state.ball.x, p.y - state.ball.y) < FOG_SIGHT_RADIUS) return true;
+  for (const h of state.players) {
+    if (h.team !== 'home') continue;
+    if (Math.hypot(p.x - h.x, p.y - h.y) < FOG_SIGHT_RADIUS) return true;
+  }
+  return false;
+}
+
+export function updateFog(state) {
+  if (!state.ui.fogOfWar) return;
+  for (const p of state.players) {
+    if (p.team !== 'away') continue;
+    if (isOpponentVisible(state, p)) {
+      p.lastSeen = { x: p.x, y: p.y, clock: state.clock };
+    } else if (!p.lastSeen) {
+      p.lastSeen = { x: p.x, y: p.y, clock: state.clock }; // เห็นครั้งแรกตอนเปิดโหมด
+    }
+  }
+}
+
+// วาด "การคาดการณ์" ของคู่แข่งที่มองไม่เห็น: วงเบลอที่ขยายตามเวลาที่หายไป
+function drawFogGhosts(ctx, state) {
+  if (!state.ui.fogOfWar) return;
+  for (const p of state.players) {
+    if (p.team !== 'away' || isOpponentVisible(state, p) || !p.lastSeen) continue;
+    const turnsLost = Math.max(0, (state.clock - p.lastSeen.clock) / 8);
+    const uncertainty = Math.min(3 + turnsLost * 2.5, 12) * SCALE * 0.4;
+    const px = toPx(p.lastSeen.x), py = toPy(p.lastSeen.y);
+    ctx.beginPath();
+    ctx.arc(px, py, uncertainty, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(224,71,61,0.10)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(224,71,61,0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', px, py);
+  }
 }
 
 // P4: Pitch Control Map — ใครคุมพื้นที่ตรงไหน (น้ำเงิน = เรา, แดง = คู่แข่ง)

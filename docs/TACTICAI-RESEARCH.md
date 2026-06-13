@@ -159,18 +159,24 @@ prescriptive ghosting เวอร์ชัน heuristic แล้ว** ต่�
 ที่ scout มองอยู่ ตำแหน่งคู่แข่งนอกสายตาแสดงเป็น "การคาดการณ์" (วงเบลอ)
 ที่อัปเดตเมื่อเห็นจริง → เพิ่มมิติการอ่านเกมโดยไม่ต้องใช้ ML
 
-### 2.6 Backlog ใหม่จาก Part 2 (เรียงตามคุ้มค่า)
+### 2.6 Backlog จาก Part 2 — **ทำครบหมดแล้ว (P5)**
 
-1. ~~Pitch control map + EPV ในการตัดสินใจ~~ — **เสร็จแล้ว**
-2. **Ghost defender replay** — หลังเทิร์นที่โดนเจาะ วาดตำแหน่ง "ที่ควรยืน"
-   ของกองหลังเทียบกับที่ยืนจริง (ghosting แบบ 2.4)
-3. **Counterfactual เทิร์นที่แล้ว** — โหลด snapshot ต้นเทิร์นจาก history
-   มาเป็น sandbox ชั่วคราว ลองยืนใหม่ + Preview โดยไม่กระทบแมตช์จริง
-4. **Fog-of-War scouting mode** (2.5) — โหมดความยากสูง
-5. **Penalty mini-game แบบ game theory** (2.1) — เลือกมุมยิง/พุ่งแบบ
-   mixed strategy เมื่อเกิดจุดโทษ
-6. **ใช้ replay dataset ฝึก receiver model จริง** — logistic regression
-   เล็ก ๆ ใน JS จาก Export Dataset แทน softmax heuristic
+1. ~~Pitch control map + EPV ในการตัดสินใจ~~ — เสร็จ (P4)
+2. ~~Ghost defender replay~~ — เสร็จ: หลังเทิร์นที่โดนเจาะ ระบบหา CB/FB/DM
+   ที่หลุดจาก "แนวที่ควรยืน" มากสุด (>9m) วาด ghost + ข้อความบอกระยะ
+3. ~~Counterfactual เทิร์นที่แล้ว~~ — เสร็จ: ปุ่ม ⏪ What-if ย้อนสนามกลับ
+   จุดเริ่มเทิร์นล่าสุดเป็น sandbox เล่น/Preview อิสระ ออกเมื่อไรแมตช์จริงกลับมา
+   ครบทุกค่า (stash/restore ผ่าน deep clone)
+4. ~~Fog-of-War scouting mode~~ — เสร็จ: ปุ่ม 🌫 เห็นคู่แข่งเฉพาะรัศมี 20m
+   จากนักเตะเรา/บอล ที่เหลือเป็นวงคาดการณ์ "?" ที่ขยายตามเวลาที่หายไป
+   (uncertainty growth ตามแนว Graph Imputer)
+5. ~~Penalty mini-game แบบ game theory~~ — เสร็จ: โดนเสียบในกรอบมีโอกาส
+   เป็นจุดโทษ ผู้เล่นเลือกมุมยิง (หรือทางพุ่ง GK ถ้าโดนจุดโทษ) สู้กับ AI
+   ที่เล่น mixed strategy 40/20/40 — เดาทางถูกเซฟ 60-70%, ผิดทางโดน 85%
+6. ~~ฝึกโมเดลจากข้อมูลเกมจริง~~ — เสร็จ: ทุกการจ่ายของทีมเราถูกเก็บเป็น
+   sample (7 features + สำเร็จ/พลาด) ปุ่ม 🧠 Train ฝึก logistic regression
+   ใน JS (<100ms) แล้วโมเดลถูกถักเข้าคะแนนการเลือกจ่ายจริง — นี่คือ
+   "Predictive layer ที่เรียนจากข้อมูล" ตัวแรกของเกม ตามเส้นทางเดียวกับ TacticAI
 
 ## 6. แหล่งอ้างอิง
 
