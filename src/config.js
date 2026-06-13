@@ -109,3 +109,16 @@ export const FOUL_BASE_RATE = 0.05;          // อัตราฟาวล์�
 export const FOUL_PRESSURE_WEIGHT = 0.12;    // น้ำหนัก pressure ต่อโอกาสฟาวล์
 export const YELLOW_CARD_THRESHOLD = 0.62;   // foulSeverity เกินนี้ = ใบเหลือง
 export const ADVANTAGE_SECONDS = 2.0;        // ได้เปรียบหลังฟาวล์ก่อนดึงกลับมาเป็นฟรีคิก
+
+// ---------- P2.9: Finishing Engine ----------
+export const GOAL_HEIGHT = 2.44;             // ความสูงประตู (เมตร)
+export const SHOT_XG_MIN = 0.01;
+export const SHOT_XG_MAX = 0.75;             // เพดาน xG (ยกเว้น penalty/tap-in โล่งจริง)
+export const BIG_CHANCE_XG = 0.30;           // xG ตั้งแต่นี้ = big chance
+export const LONG_SHOT_MAX_XG = 0.06;        // เพดาน xG ลูกไกล
+export const GK_BASE_REACH = 0.42;           // ฐานโอกาสเซฟลูกเข้ากรอบ (ก่อนปรับ placement/power)
+export const GK_REACTION_WEIGHT = 0.28;      // น้ำหนัก reaction/positioning ต่อ saveChance
+export const SHOT_TARGET_ERROR_BASE = 0.18;  // ความคลาดเคลื่อนการเล็งพื้นฐาน
+export const SHOT_PRESSURE_ERROR = 0.07;     // ความคลาดเคลื่อนเพิ่มต่อ pressure
+export const POST_CHANCE_MAX = 0.08;         // โอกาสชนเสาสูงสุด (ลูกคุณภาพดี)
+export const REBOUND_CHANCE_BASE = 0.5;      // โอกาสที่ลูกเซฟ/บล็อกกลายเป็น rebound

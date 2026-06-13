@@ -118,6 +118,17 @@ export function markLastTouch(ball, player) {
   ball.lastTouchTeam = player.team;
 }
 
+// P2.9: บันทึกผู้ยิงเป็นผู้สัมผัสล่าสุด (alias เชิงความหมาย)
+export function markShotLastTouch(ball, shooter) {
+  markLastTouch(ball, shooter);
+  ball.ballMode = 'shot';
+}
+
+// P2.9: สร้างลูก rebound จากการยิง (เซฟ/บล็อก/ชนเสา) เป็น loose ball
+export function createReboundBall(state, x, y, vx, vy, vz = 0) {
+  createRebound(state, x, y, vx, vy, vz);
+}
+
 // P2.8: วางบอลนิ่งที่จุด restart แล้วหยุดความเร็วทั้งหมด
 export function placeBallAtRestartSpot(ball, x, y) {
   ball.x = x;

@@ -220,6 +220,10 @@ select, input[type="range"] {
 .ev-penalty { color: #ff7a59; font-weight: 700; }
 .ev-restart { color: #7fd1ff; }
 .ev-foul { color: #e8b73a; }
+/* P2.9: finishing event badges */
+.ev-bigchance { color: #ffd166; font-weight: 700; }
+.ev-save { color: #9ad0ff; }
+.ev-block { color: #c9a0ff; }
 
 /* player info */
 .pi-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }

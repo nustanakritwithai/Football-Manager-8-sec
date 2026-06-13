@@ -25,6 +25,11 @@ export function createInitialState(homeFormation = '4-2-3-1') {
     structuredEvents: [],   // เหตุการณ์แบบ structured ของเทิร์นล่าสุด
     foulCount: { home: 0, away: 0 },
     cards: { yellow: [], red: [] },
+    // P2.9: สถิติการยิงสะสมทั้งแมตช์ (ใช้คุม balance + AI วิเคราะห์)
+    matchStats: {
+      home: { shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 },
+      away: { shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 },
+    },
     tacticalScores: null,
     prevScores: null,
     // P2: tactical intelligence

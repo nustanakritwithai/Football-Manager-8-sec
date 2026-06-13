@@ -204,6 +204,13 @@ save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อ
   auto-resolve), clock เดินเฉพาะวินาทีที่บอล live, scoreboard/overlay แสดง playState + restart spot
   และ AI Assistant แนะนำ set piece + เตือนเสีย corner/ฟาวล์หน้าเขตโทษ
   (MVP — ยังไม่ทำ offside / VAR / ไล่ผู้เล่นออกจากใบแดง / set-piece play ละเอียด)
+- **🥅 Finishing Engine (P2.9)** — ระบบจบสกอร์ 6 ชั้น: shot context → xG → เลือกโซนกรอบประตู
+  → block check → goalkeeper reach → outcome แทนตรรกะ "ยิง=ติดโกล" เดิม:
+  **โอกาสเข้าผูกกับ xG** (คุมสกอร์ด้วยคุณภาพโอกาส ไม่ใช่ให้ GK เซฟทุกลูก), `chooseShotTarget`
+  แบ่งกรอบเป็นโซน (low/top corner, near post, central) กันยิงกลางตลอด, GK เซฟ/รับติด/ปัดออก/
+  กระฉอกตาม placement & power & reach, มี block→corner/rebound, ยิงพลาด→goal kick, ชนเสา
+  เก็บ matchStats (shots/onTarget/goals/xG/bigChances/saves/blocks/posts) + AI เตือน placement/
+  finishing/GK แข็ง — บาลานซ์ ~2 ประตู/เกม, on-target 2–6, สกอร์ทั่วไป 0-0/1-0/1-1/2-1
 
 ## การทดสอบ
 
@@ -214,6 +221,7 @@ node tests/p5-research.mjs     # penalty, learning, what-if, fog of war
 node tests/p26-finishing.mjs   # must-shoot, cutback, no wild shots, shot volume, cross
 node tests/p27-ball-physics.mjs # rolling, bounce, deflection, first touch, rebound, second ball
 node tests/p28-match-rules.mjs # goal/ball-out, restart exec, foul, dead-ball stop, save/load
+node tests/p29-finishing.mjs   # xG bands, target zones, GK-not-a-wall, score balance, calibration
 ```
 
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime

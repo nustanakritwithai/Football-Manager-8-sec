@@ -218,7 +218,13 @@ export function updateDashboard(state) {
   const mid = Math.round(controlShare(ctrl, 'middle') * 100);
   const fin = Math.round(controlShare(ctrl, 'finalThird') * 100);
   if (els.spaceShare) {
-    els.spaceShare.textContent = `คุมพื้นที่ — กลางสนาม ${mid}% · final third ${fin}%`;
+    let txt = `คุมพื้นที่ — กลางสนาม ${mid}% · final third ${fin}%`;
+    // P2.9: สรุปสถิติการยิงทั้งแมตช์ (เรา)
+    const ms = state.matchStats?.home;
+    if (ms && ms.shots > 0) {
+      txt += ` · ยิง ${ms.shots} (เข้ากรอบ ${ms.shotsOnTarget}) xG ${ms.xg.toFixed(2)} · big ${ms.bigChances} · เซฟ ${state.matchStats.away.saves} บล็อก ${state.matchStats.away.blocks}`;
+    }
+    els.spaceShare.textContent = txt;
   }
 
   // score bars
@@ -255,8 +261,11 @@ export function updateDashboard(state) {
   for (const e of events) {
     const li = document.createElement('li');
     li.textContent = e;
-    if (e.startsWith('GOAL')) li.className = 'ev-goal';
+    if (e.startsWith('GOAL') || e.includes('— GOAL')) li.className = 'ev-goal';
     else if (e.includes('PENALTY') || e.includes('Penalty')) li.className = 'ev-penalty';
+    else if (e.includes('[BIG CHANCE]') || e.includes('Big chance missed')) li.className = 'ev-bigchance';
+    else if (e.includes('saved') || e.includes('Great save') || e.includes('parried') || e.includes('hold')) li.className = 'ev-save';
+    else if (e.includes('blocked') || e.includes('hits the post')) li.className = 'ev-block';
     else if (e.includes('Corner to') || e.includes('Goal kick to') || e.includes('Throw-in to')) li.className = 'ev-restart';
     else if (e.startsWith('Free kick') || e.includes('Foul') || e.includes('Yellow card')) li.className = 'ev-foul';
     els.eventList.appendChild(li);

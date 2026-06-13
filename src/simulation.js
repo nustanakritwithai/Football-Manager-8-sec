@@ -13,12 +13,15 @@ import {
   GOAL_HALF_WIDTH, CROSSBAR_HEIGHT, PENALTY_AREA_DEPTH, PENALTY_AREA_HALF_WIDTH,
   PENALTY_SPOT_DISTANCE, SIX_YARD_DEPTH, FOUL_BASE_RATE, FOUL_PRESSURE_WEIGHT,
   YELLOW_CARD_THRESHOLD,
+  GOAL_HEIGHT, SHOT_XG_MIN, SHOT_XG_MAX, BIG_CHANCE_XG, LONG_SHOT_MAX_XG,
+  GK_BASE_REACH, GK_REACTION_WEIGHT, SHOT_TARGET_ERROR_BASE, SHOT_PRESSURE_ERROR,
+  POST_CHANCE_MAX, REBOUND_CHANCE_BASE,
 } from './config.js';
 import { clamp, dist, distP, lerp, pointSegDist, rand } from './utils.js';
 import { maxSpeed, movementRadius, firstTouchAttr, reactionAttr } from './player.js';
 import {
   giveBall, startPass, makeLoose, createRebound, stepLooseBall, reflectVelocity,
-  markLastTouch, placeBallAtRestartSpot,
+  markLastTouch, placeBallAtRestartSpot, markShotLastTouch,
 } from './ball.js';
 import { attackDir, goalAttackedBy, goalDefendedBy, teamPlayers, getPlayer } from './team.js';
 import { recordEvent, recordStructuredEvent, kickoff, isMatchOver } from './state.js';
@@ -78,8 +81,8 @@ export function startSimulation(state) {
     pendingPass: null,        // { fromId, startX, toRunner }
     justReceived: new Map(),  // playerId -> tick ที่เพิ่งได้บอล (first-time shot bonus)
     stats: {
-      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
-      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
+      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
+      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
     },
     congestion: null,
     lastAction: null,         // ป้าย action ล่าสุดของผู้ถือบอล (แสดงบนสนาม)
@@ -543,6 +546,7 @@ function backLineSpot(state, sideOut, _isCorner) {
 
 function handleGoal(state, scoringTeam) {
   state.score[scoringTeam]++;
+  if (state.matchStats?.[scoringTeam]) state.matchStats[scoringTeam].goals++;
   if (state.sim) state.sim.goalScored = true;
   const concede = scoringTeam === 'home' ? 'away' : 'home';
   recordEvent(state, `GOAL!!! ${scoringTeam === 'home' ? state.teams.home.teamName : state.teams.away.teamName} scores!`);
@@ -671,9 +675,12 @@ function resolvePenaltyRestart(state, r) {
   const goal = goalAttackedBy(atk);
   recordEvent(state, `Penalty to ${atk === 'home' ? 'Home' : 'Away'}!`);
 
+  bumpMatch(state, atk, 'shots');
+  bumpMatch(state, atk, 'shotsOnTarget');
   const scoreChance = clamp(0.62 + (shooter.shooting - (gk?.positioning ?? 60)) / 300, 0.5, 0.85);
   if (Math.random() < scoreChance) {
     state.score[atk]++;
+    if (state.matchStats?.[atk]) state.matchStats[atk].goals++;
     recordEvent(state, `Penalty scored by ${atk === 'home' ? 'our' : 'their'} ${shooter.role}!`);
     recordStructuredEvent(state, { type: 'GOAL', team: atk, text: 'Penalty goal' });
     restartAfterGoal(state, def); // เล่นต่อเป็น kickoff ของทีมเสียประตู
@@ -1701,69 +1708,174 @@ function executePass(state, owner, option, pressure) {
   }
 }
 
+// ---------- P2.9: Finishing Engine ----------
+// 6 ชั้น: context → xG → target → block → GK reach → outcome
+// แกนกันสกอร์ล้น: โอกาสเข้าผูกกับ xG (คุณภาพโอกาส) ส่วน GK/block/placement กำหนด "รูปแบบผล"
+
+function bumpMatch(state, team, key, n = 1) {
+  const m = state.matchStats?.[team];
+  if (m) m[key] = (m[key] || 0) + n;
+}
+
+// 1) Shot context
+export function evaluateShotContext(state, shooter, pressure = 0, gk = null) {
+  const goal = goalAttackedBy(shooter.team);
+  const dGoal = distP(shooter, goal);
+  const angle = goalOpenAngle(shooter, shooter.team);
+  const blockers = countBlockers(state, shooter, shooter.team);
+  const central = clamp(1 - Math.abs(shooter.y - 34) / 22, 0, 1);
+  const keeper = gk || teamPlayers(state, shooter.team === 'home' ? 'away' : 'home').find((p) => p.role === 'GK');
+  const keeperOffLine = keeper ? clamp(Math.abs(keeper.x - goal.x) - 1, 0, 10) : 0;
+  // 1v1: ใกล้ประตู ไม่มีกองหลังขวาง
+  const isOneOnOne = dGoal < 18 && blockers === 0 && central > 0.55;
+  return {
+    dGoal, angle, pressure, blockers, central,
+    isTightAngle: angle < 0.18,
+    isOneOnOne,
+    keeperOutOfPosition: clamp(keeperOffLine / 8, 0, 1),
+    zone: dGoal > 24 ? 'long' : dGoal > 17 ? 'edge' : angle < 0.18 ? 'tight' : dGoal < 12 && central > 0.5 ? 'big' : 'box',
+  };
+}
+
+// 2) xG — สอบเทียบกับช่วงจริง (long 0.02-0.06, box 0.12-0.30, big 0.30-0.55, tight 0.04-0.16)
+export function calculateXG(ctx, shooter) {
+  const distanceScore = clamp(1 - ctx.dGoal / 28, 0, 1);
+  const angleScore = clamp(ctx.angle / 0.7, 0, 1);
+  const shooterQuality = shooter.shooting / 100;
+  let xg = distanceScore * 0.28
+    + angleScore * 0.22
+    + ctx.central * 0.09
+    + shooterQuality * 0.11
+    + ctx.keeperOutOfPosition * 0.07
+    + (ctx.isOneOnOne ? 0.08 : 0)
+    - clamp(ctx.pressure * 0.05, 0, 0.18)
+    - clamp(ctx.blockers * 0.045, 0, 0.18);
+  if (ctx.dGoal > 24) xg = Math.min(xg, LONG_SHOT_MAX_XG);
+  if (ctx.isTightAngle) xg = Math.min(xg, 0.16);
+  return clamp(xg, SHOT_XG_MIN, SHOT_XG_MAX);
+}
+
+// 3) Shot target selection — เลือกโซนกรอบประตู + ความแม่น (กันยิงกลางประตูตลอด)
+export function chooseShotTarget(ctx, shooter) {
+  const aim = clamp(
+    0.5 + shooter.shooting / 250
+    - ctx.pressure * SHOT_PRESSURE_ERROR
+    - (ctx.isTightAngle ? 0.12 : 0)
+    - clamp((ctx.dGoal - 12) / 55, 0, 0.22)
+    - SHOT_TARGET_ERROR_BASE * 0.5,
+    0.2, 0.85
+  );
+  const cornered = clamp(aim * rand(0.5, 1.15), 0, 1); // วางมุมได้ดีแค่ไหน
+  let zone;
+  if (cornered > 0.62) zone = rand(0, 1) < 0.5 ? 'low corner' : 'top corner';
+  else if (cornered > 0.36) zone = rand(0, 1) < 0.6 ? 'low corner' : 'near post';
+  else zone = 'central';
+  return { aim, cornered, zone };
+}
+
+// 4) Block check — กองหลังในเส้นยิง
+function checkShotBlock(state, owner, goal) {
+  let best = null;
+  for (const o of state.players) {
+    if (o.team === owner.team || o.role === 'GK') continue;
+    if ((o.x - owner.x) * (goal.x - owner.x) <= 0) continue;
+    const ld = pointSegDist(o.x, o.y, owner.x, owner.y, goal.x, 34);
+    if (ld < 2.2 && (!best || ld < best.laneDist)) best = { def: o, laneDist: ld };
+  }
+  if (!best) return null;
+  best.blockChance = clamp(
+    0.4
+    + (best.def.tackling / 100) * 0.2
+    + (1 - best.laneDist / 2.2) * 0.3
+    - (owner.shooting / 100) * 0.15,
+    0.1, 0.85
+  );
+  return best;
+}
+
+// 5) GK save flavor (เมื่อรู้แล้วว่าไม่ใช่ goal และอยู่ในกรอบ) → held/parried/rebound
+function resolveSaveFlavor(gk, owner, target) {
+  if (!gk) return 'rebound';
+  const holdChance = clamp(
+    (gk.positioning / 100) * 0.45
+    + (1 - target.cornered) * 0.4
+    - (owner.shooting / 100) * 0.2,
+    0.2, 0.75
+  );
+  if (Math.random() < holdChance) return 'held';
+  // ยิงเข้ามุม → ปัดออกข้าง (corner) ; ยิงกลาง → กระฉอกหน้าเขต (rebound)
+  return target.cornered > 0.45 ? 'parried' : 'rebound';
+}
+
 function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
   const sim = state.sim;
   const dir = attackDir(owner.team);
   const goal = goalAttackedBy(owner.team);
-  const angleFactor = clamp(1 - Math.abs(owner.y - 34) / 22, 0.15, 1);
-  const shotSpeed = clamp(18 + owner.shooting * 0.13, 18, 31);
-  sim.stats[owner.team].shots++;
-  state.ball.lastTouchTeam = owner.team;
-  state.ball.lastTouchPlayerId = owner.id;
   const ours = owner.team === 'home';
   const who = ours ? 'Our' : 'Their';
   const defTeam = ours ? 'away' : 'home';
-  const zoneNote = zone === 'must' || zone === 'good' ? ' (good position)' : '';
-  recordEvent(state, `Shot chance! ${who} ${owner.role} shoots from ${Math.round(dGoal)}m${zoneNote}`);
+  const gk = teamPlayers(state, defTeam).find((p) => p.role === 'GK');
 
-  // จุด restart ที่อาจเกิดจากลูกยิงนี้
+  // 1) context + 2) xG
+  const ctx = evaluateShotContext(state, owner, pressure, gk);
+  const xg = calculateXG(ctx, owner);
+  markShotLastTouch(state.ball, owner);
+  sim.stats[owner.team].shots++;
+  sim.stats[owner.team].xg += xg;
+  bumpMatch(state, owner.team, 'shots');
+  bumpMatch(state, owner.team, 'xg', xg);
+  const isBig = xg >= BIG_CHANCE_XG;
+  if (isBig) bumpMatch(state, owner.team, 'bigChances');
+  recordEvent(state, `Shot chance! ${who} ${owner.role} from ${Math.round(dGoal)}m (xG ${xg.toFixed(2)})${isBig ? ' [BIG CHANCE]' : ''}`);
+  recordStructuredEvent(state, { type: 'SHOT', team: owner.team, xg: +xg.toFixed(2), zone: ctx.zone });
+
   const cornerSpot = { x: goal.x, y: owner.y < 34 ? 0 : PITCH.width };
   const cornerSide = owner.y < 34 ? 'top' : 'bottom';
   const bylineSide = dir === 1 ? 'right' : 'left';
+  const target = chooseShotTarget(ctx, owner);
 
-  // 1) บล็อกโดยกองหลังในเส้นยิง → rebound ในสนาม หรือแฉลบออกหลัง = corner (P2.7/P2.8)
-  const blocker = nearestLaneDefender(state, owner, goal);
-  if (blocker) {
-    const blockChance = clamp(
-      0.16
-      + (blocker.def.tackling / 100) * 0.16
-      + (blocker.def.positioning / 100) * 0.12
-      + (1 - blocker.laneDist / PLAYER_BLOCK_RADIUS) * 0.18
-      + clamp(shotSpeed / 90, 0, 0.1)
-      - (owner.shooting / 100) * 0.18,
-      0.04, 0.6
-    );
-    if (Math.random() < blockChance) {
-      const defWho = blocker.def.team === 'home' ? 'our' : 'their';
-      setBallFx(state, 'Blocked');
-      if (Math.random() < 0.45) {
-        recordEvent(state, `Shot blocked by ${defWho} ${blocker.def.role} — out for a corner`);
-        createRestartEvent(state, 'corner', owner.team, cornerSpot, cornerSide);
-      } else {
-        const r = reflectVelocity(dir * shotSpeed, 0,
-          blocker.def.x - owner.x, blocker.def.y - owner.y, DEFLECTION_NOISE);
-        createRebound(state, blocker.def.x, blocker.def.y, r.x * 0.5, r.y * 0.5, rand(1.5, 4));
-        state.ball.lastTouchTeam = blocker.def.team;
-        state.ball.lastTouchPlayerId = blocker.def.id;
-        markSecondBall(state, 'rebound', blocker.def.team);
-        recordEvent(state, `Shot blocked by ${defWho} ${blocker.def.role} — rebound loose`);
-      }
-      return;
-    }
+  // === GOAL ผูกกับ xG (คุมสกอร์ด้วยคุณภาพโอกาส ไม่ใช่โกลโกง) ===
+  if (Math.random() < xg) {
+    sim.stats[owner.team].shotsOnTarget++;
+    bumpMatch(state, owner.team, 'shotsOnTarget');
+    setBallFx(state, 'GOAL');
+    recordEvent(state, `Shot — ${target.zone} — GOAL! (${who} ${owner.role})`);
+    handleGoal(state, owner.team); // นับ matchStats.goals ภายใน
+    return;
   }
 
-  const prob = clamp(
-    0.62 * (1 - dGoal / 32) * (owner.shooting / 85) * angleFactor / (1 + pressure * 0.8),
-    0.02, 0.52
-  );
-  const gk = teamPlayers(state, defTeam).find((p) => p.role === 'GK');
+  // === ไม่เข้า: ตัดสินว่าเพราะอะไร (block / post / save / wide) ===
 
-  // 2) ชนเสา/คาน (เฉพาะลูกมุมดีพอควร) — ไม่บ่อยเกินไป
-  if (angleFactor > 0.3 && Math.random() < POST_HIT_CHANCE) {
+  // 4) block
+  const block = checkShotBlock(state, owner, goal);
+  if (block && Math.random() < block.blockChance) {
+    const defWho = block.def.team === 'home' ? 'our' : 'their';
+    sim.stats[block.def.team].blocks++;
+    bumpMatch(state, block.def.team, 'blocks');
+    setBallFx(state, 'Blocked');
+    if (Math.random() < 0.45) {
+      recordEvent(state, `Shot blocked by ${defWho} ${block.def.role} — out for a corner`);
+      createRestartEvent(state, 'corner', owner.team, cornerSpot, cornerSide);
+    } else {
+      const sp = clamp(18 + owner.shooting * 0.13, 18, 31);
+      const r = reflectVelocity(dir * sp, 0, block.def.x - owner.x, block.def.y - owner.y, DEFLECTION_NOISE);
+      createRebound(state, block.def.x, block.def.y, r.x * 0.5, r.y * 0.5, rand(1.5, 4));
+      markLastTouch(state.ball, block.def);
+      markSecondBall(state, 'rebound', block.def.team);
+      recordEvent(state, `Shot blocked by ${defWho} ${block.def.role} — rebound loose`);
+    }
+    return;
+  }
+
+  // 2b) post/bar — ลูกคุณภาพดีที่พลาดขอบกรอบนิดเดียว
+  const postChance = clamp(POST_CHANCE_MAX * (xg / 0.4), 0.01, POST_CHANCE_MAX);
+  if (Math.random() < postChance) {
+    const sp = clamp(18 + owner.shooting * 0.13, 18, 31);
     const px = clamp(goal.x - dir * 1.2, 1, PITCH.length - 1);
     const py = 34 + (owner.y < 34 ? -1 : 1) * 3.4;
-    createRebound(state, px, py,
-      -dir * shotSpeed * POST_REBOUND_POWER, rand(-4, 4), rand(1, 3));
+    bumpMatch(state, owner.team, 'posts');
+    sim.stats[owner.team].posts++;
+    createRebound(state, px, py, -dir * sp * POST_REBOUND_POWER, rand(-4, 4), rand(1, 3));
     state.ball.spin = rand(-0.4, 0.4);
     markSecondBall(state, 'rebound', owner.team);
     setBallFx(state, 'Post!');
@@ -1771,58 +1883,33 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
     return;
   }
 
-  // 3) เข้า
-  if (Math.random() < prob) {
-    handleGoal(state, owner.team); // P2.8: นับสกอร์ + หยุดเทิร์น + ตั้ง kickoff
-    return;
-  }
-
-  // 4) ไม่เข้า: ยิงพลาดออกหลัง = goal kick / เข้ากรอบให้ GK เซฟ (รับติด/ปัดออก=corner/ปัดในกรอบ)
-  if (!gk || Math.random() < 0.25) {
-    recordEvent(state, `${who} ${owner.role} shoots wide`);
+  // 5) on target (saved) vs off target (wide) — ความแม่นจาก target.aim
+  if (!gk || Math.random() >= target.aim) {
+    recordEvent(state, isBig ? `Big chance missed — ${who} ${owner.role} shoots wide` : `${who} ${owner.role} shoots wide`);
     createRestartEvent(state, 'goalKick', defTeam, backLineSpot(state, bylineSide, false), bylineSide);
     return;
   }
-  if (Math.random() < GK_HOLD_CHANCE) {
-    recordEvent(state, `Shot saved — ${gk.team === 'home' ? 'our' : 'their'} keeper holds it`);
+
+  // เข้ากรอบแต่ GK เซฟ — แยก held/parried(corner)/rebound(in box)
+  sim.stats[owner.team].shotsOnTarget++;
+  bumpMatch(state, owner.team, 'shotsOnTarget');
+  bumpMatch(state, gk.team, 'saves');
+  sim.stats[gk.team].saves++;
+  const flavor = resolveSaveFlavor(gk, owner, target);
+  setBallFx(state, 'Save');
+  if (flavor === 'held') {
+    recordEvent(state, `Shot ${target.zone} — saved, ${gk.team === 'home' ? 'our' : 'their'} keeper holds it`);
     giveBall(state, gk);
-  } else if (Math.random() < 0.5) {
-    recordEvent(state, `${gk.team === 'home' ? 'Our' : 'Their'} GK tips it over — corner`);
+  } else if (flavor === 'parried') {
+    recordEvent(state, `Great save! ${gk.team === 'home' ? 'Our' : 'Their'} GK tips the ${target.zone} effort over — corner`);
     createRestartEvent(state, 'corner', owner.team, cornerSpot, cornerSide);
   } else {
-    gkParry(state, gk, owner); // ปัดในกรอบ → rebound danger
+    const px = clamp(gk.x + dir * 1.5, 1, PITCH.length - 1);
+    createRebound(state, px, gk.y, -dir * GK_PARRY_POWER * 0.6, rand(-4, 4), rand(1.5, 3.5));
+    markLastTouch(state.ball, gk);
+    markSecondBall(state, 'parried', gk.team);
+    recordEvent(state, `${gk.team === 'home' ? 'Our' : 'Their'} GK can't hold it — rebound in the box!`);
   }
-}
-
-// หากองหลังที่ขวางเส้นยิงใกล้ที่สุด (ไม่นับ GK) — คืน { def, laneDist } หรือ null
-function nearestLaneDefender(state, owner, goal) {
-  let best = null;
-  for (const o of state.players) {
-    if (o.team === owner.team || o.role === 'GK') continue;
-    // ต้องอยู่ "ระหว่าง" ผู้ยิงกับประตู
-    if ((o.x - owner.x) * (goal.x - owner.x) <= 0) continue;
-    const ld = pointSegDist(o.x, o.y, owner.x, owner.y, goal.x, 34);
-    if (ld < 2.2 && (!best || ld < best.laneDist)) best = { def: o, laneDist: ld };
-  }
-  return best;
-}
-
-// GK ปัดบอล — ปัดออกข้างบ่อยกว่า บางครั้งหลุดหน้าประตูเป็น rebound ในกรอบ
-function gkParry(state, gk, owner) {
-  const dir = attackDir(owner.team);
-  const ours = owner.team === 'home';
-  const center = Math.random() < GK_PARRY_CENTER_CHANCE;
-  const side = owner.y < 34 ? 1 : -1; // ปัดออกด้านตรงข้ามทิศที่ลูกมา
-  const vx = -dir * GK_PARRY_POWER * (center ? 0.5 : 0.7);
-  const vy = center ? rand(-3, 3) : side * GK_PARRY_POWER * 0.8;
-  createRebound(state, clamp(gk.x + dir * 1.5, 1, PITCH.length - 1), gk.y, vx, vy, rand(1.5, 3.5));
-  state.ball.lastTouchTeam = gk.team;
-  state.ball.lastTouchPlayerId = gk.id;
-  markSecondBall(state, 'parried', gk.team);
-  setBallFx(state, 'Parry');
-  recordEvent(state, center
-    ? `${ours ? 'Our' : 'Their'} shot parried into the box — rebound danger!`
-    : `${gk.team === 'home' ? 'Our' : 'Their'} GK parried the shot wide — rebound loose`);
 }
 
 function restartAfterGoal(state, kickoffTeam) {

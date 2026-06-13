@@ -295,6 +295,19 @@ export function generateAdvice(state, analysis, events, prevScores) {
     candidates.push({ priority: 41, severity: 'info', text: 'ได้ลูกตั้งเตะในแดนคู่แข่ง — ใช้จังหวะ set piece ให้เป็นโอกาสจบสกอร์ ดันตัวเป้าเข้ากรอบก่อนเล่น' });
   }
 
+  // --- P2.9: finishing quality ---
+  if (flags.bigChanceMissed) {
+    candidates.push({ priority: 67, severity: 'warn', text: 'พลาด big chance — จังหวะแบบนี้ต้องจบให้ได้ เล็งมุมประตูแทนการยิงกลาง และยิงจังหวะเดียวเมื่อบอลมาเร็ว' });
+  }
+  if (flags.shotsTooCentral || flags.opponentKeeperHot) {
+    candidates.push({ priority: 62, severity: 'warn', text: 'ยิงเข้ากรอบหลายครั้งแต่ถูก GK รับง่าย เพราะยิงกลางประตู/placement ต่ำ — เล็ง low corner หรือเสาไกลให้ GK ต้องพุ่งจริง' });
+  } else if (flags.underperformingXg) {
+    candidates.push({ priority: 60, severity: 'info', text: 'xG สะสมสูงแต่ยังไม่เป็นประตู — โอกาสดีพอแล้ว ปัญหาอยู่ที่ finishing/placement ลองเลือกมุมยิงให้คมขึ้น' });
+  }
+  if (flags.wastefulShooting) {
+    candidates.push({ priority: 56, severity: 'info', text: 'ยิงหลุดกรอบบ่อย — ถ้ามุมแคบหรือโดนบีบ ลอง cutback หาตัวกลางกรอบแทนการฝืนยิง' });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;

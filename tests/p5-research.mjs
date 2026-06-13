@@ -49,7 +49,7 @@ const playTurn = (s) => { startSimulation(s); let n = 0; while (!simTick(s)) if 
 // ---- Learning: เทรนจาก pattern สังเคราะห์ได้จริง ----
 {
   const fake = { passSamples: [] };
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 400; i++) { // ตัวอย่างมากขึ้น → accuracy เสถียร ไม่ flake รอบ threshold
     const f = Array.from({ length: PASS_FEATURE_COUNT }, () => Math.random());
     // กติกาแอบแฝง: lane ปลอดภัย + pressure ต่ำ = สำเร็จ
     const y = f[0] > 0.45 && f[6] < 0.6 ? (Math.random() < 0.9 ? 1 : 0) : (Math.random() < 0.2 ? 1 : 0);

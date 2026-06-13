@@ -44,7 +44,33 @@ export function analyze(state) {
   // P2.8: ตรวจ set piece / foul / restart
   detectMatchRuleIssues(state, flags);
 
+  // P2.9: ตรวจคุณภาพการจบสกอร์ (finishing engine)
+  detectFinishingQuality(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2.9: finishing quality detections (มุมมองทีมเรา) ----------
+
+function detectFinishingQuality(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const ms = state.matchStats?.home;
+  if (!ms) return;
+
+  flags.bigChanceMissed = events.some((e) => e.startsWith('Big chance missed'));
+
+  // xG สะสมสูงแต่ยังไม่ยิงเข้า = finishing/placement ต่ำ
+  flags.underperformingXg = ms.shots >= 6 && (ms.xg - ms.goals) >= 1.0;
+
+  // เข้ากรอบบ่อยแต่ไม่เป็นประตู = ยิงกลางประตู/โดน GK เซฟง่าย
+  flags.shotsTooCentral = ms.shotsOnTarget >= 5 && ms.goals === 0;
+
+  // ยิงไม่เข้ากรอบเยอะ = placement หลุด/เลือกยิงจังหวะแย่
+  flags.wastefulShooting = ms.shots >= 8 && (ms.shotsOnTarget / ms.shots) < 0.3;
+
+  // GK คู่แข่งแข็งเกิน (เซฟเยอะเทียบ on-target ของเรา) — แต่ต้องมี on-target พอ
+  const awaySaves = state.matchStats?.away?.saves ?? 0;
+  flags.opponentKeeperHot = ms.shotsOnTarget >= 5 && awaySaves >= 4 && ms.goals === 0;
 }
 
 // ---------- P2.8: set piece / foul detections (มุมมองทีมเรา = home) ----------
