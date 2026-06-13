@@ -146,7 +146,11 @@ export function setStatus(text, isError = false) {
 }
 
 export function updateDashboard(state) {
-  els.clock.textContent = formatClock(state.clock);
+  // นาฬิกาแมตช์ 0→90' + ป้ายครึ่ง/พักครึ่ง
+  const halfTag = state.playState === 'halftime' ? ' · HT'
+    : state.phase === 'finished' ? ' · FT'
+    : ` · ${state.half === 2 ? '2nd' : '1st'} half`;
+  els.clock.textContent = `${formatClock(state.clock)}${halfTag}`;
   els.turn.textContent = `เทิร์น ${Math.min(state.turn, MATCH_TURNS)}/${MATCH_TURNS}`;
   els.scoreline.textContent = `${state.teams.home.teamName} ${state.score.home} - ${state.score.away} ${state.teams.away.teamName}`;
   els.awayStyle.textContent = `คู่แข่ง: ${state.teams.away.strategy}`;
@@ -158,18 +162,29 @@ export function updateDashboard(state) {
   els.phase.className = `phase phase-${state.ui.whatIf ? 'simulating' : state.phase}`;
 
   if (els.teamPhase) {
-    els.teamPhase.textContent = DEBUG.showPhase
+    let txt = DEBUG.showPhase
       ? `ทีมเรา: ${state.teamPhases?.home ?? '–'} · ${state.teamObjectives?.home ?? '–'}`
       : '';
+    // P2.8: สถานะการเล่น + restart ที่รออยู่
+    if (state.restart) {
+      const labels = { kickoff: 'Kick-off', throwIn: 'Throw-in', goalKick: 'Goal kick', corner: 'Corner', freeKick: 'Free kick', penalty: 'Penalty' };
+      const who = state.restart.team === 'home' ? 'เรา' : 'คู่แข่ง';
+      txt += `${txt ? ' · ' : ''}⚑ Restart: ${labels[state.restart.type] || state.restart.type} → ${who}`;
+    } else if (state.playState && state.playState !== 'live') {
+      txt += `${txt ? ' · ' : ''}${state.playState}`;
+    }
+    els.teamPhase.textContent = txt;
   }
 
   const busy = state.phase === 'simulating';
   const pen = !!state.pendingPenalty;
   els.btnPlay.disabled = busy || pen || state.phase === 'finished';
   els.btnPlay.textContent = state.phase === 'finished'
-    ? 'จบแมตช์แล้ว'
+    ? 'จบแมตช์แล้ว (Full Time)'
     : pen ? 'รอตัดสินจุดโทษ…'
-    : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…` : `▶ Play Next ${TURN_SECONDS} Seconds`;
+    : busy ? `กำลังจำลอง ${TURN_SECONDS} วินาที…`
+    : state.playState === 'halftime' ? '▶ เริ่มครึ่งหลัง (2nd Half)'
+    : `▶ Play Next ${TURN_SECONDS} Seconds`;
   for (const b of [
     els.btnReset, els.btnExport, els.btnImport, els.formation,
     els.btnPreview, els.btnAdjust, els.btnApplyGhosts, els.btnCorner, els.btnWhatIf, els.btnTrain,
@@ -209,7 +224,13 @@ export function updateDashboard(state) {
   const mid = Math.round(controlShare(ctrl, 'middle') * 100);
   const fin = Math.round(controlShare(ctrl, 'finalThird') * 100);
   if (els.spaceShare) {
-    els.spaceShare.textContent = `คุมพื้นที่ — กลางสนาม ${mid}% · final third ${fin}%`;
+    let txt = `คุมพื้นที่ — กลางสนาม ${mid}% · final third ${fin}%`;
+    // P2.9: สรุปสถิติการยิงทั้งแมตช์ (เรา)
+    const ms = state.matchStats?.home;
+    if (ms && ms.shots > 0) {
+      txt += ` · ยิง ${ms.shots} (เข้ากรอบ ${ms.shotsOnTarget}) xG ${ms.xg.toFixed(2)} · big ${ms.bigChances} · เซฟ ${state.matchStats.away.saves} บล็อก ${state.matchStats.away.blocks}`;
+    }
+    els.spaceShare.textContent = txt;
   }
 
   // score bars
@@ -246,7 +267,13 @@ export function updateDashboard(state) {
   for (const e of events) {
     const li = document.createElement('li');
     li.textContent = e;
-    if (e.startsWith('GOAL')) li.className = 'ev-goal';
+    if (e.startsWith('GOAL') || e.includes('— GOAL')) li.className = 'ev-goal';
+    else if (e.includes('PENALTY') || e.includes('Penalty')) li.className = 'ev-penalty';
+    else if (e.includes('[BIG CHANCE]') || e.includes('Big chance missed')) li.className = 'ev-bigchance';
+    else if (e.includes('saved') || e.includes('Great save') || e.includes('parried') || e.includes('hold')) li.className = 'ev-save';
+    else if (e.includes('blocked') || e.includes('hits the post')) li.className = 'ev-block';
+    else if (e.includes('Corner to') || e.includes('Goal kick to') || e.includes('Throw-in to')) li.className = 'ev-restart';
+    else if (e.startsWith('Free kick') || e.includes('Foul') || e.includes('Yellow card')) li.className = 'ev-foul';
     els.eventList.appendChild(li);
   }
   if (!events.length) {
@@ -318,7 +345,90 @@ export function drawOverlays(ctx, state) {
   drawIntents(ctx, state);
   drawRunArrows(ctx, state);
   drawCarrierAction(ctx, state);
+  // P2.7: ball physics visuals
+  drawBallTrail(ctx, state);
+  drawSecondBallZone(ctx, state);
+  drawLooseBallPulse(ctx, state);
+  drawBallFxLabel(ctx, state);
+  // P2.8: restart marker
+  drawRestartMarker(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P2.8: จุด restart ที่รอเล่น (corner/free kick/throw-in/...) ตอน planning
+function drawRestartMarker(ctx, state) {
+  const r = state.restart;
+  if (!r || state.phase !== 'planning') return;
+  const px = toPx(r.spot.x), py = toPy(r.spot.y);
+  const col = r.team === 'home' ? COLORS.home : COLORS.away;
+  ctx.beginPath();
+  ctx.arc(px, py, 7, 0, Math.PI * 2);
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(px, py, 2, 0, Math.PI * 2);
+  ctx.fillStyle = col;
+  ctx.fill();
+  const labels = { kickoff: 'Kick-off', throwIn: 'Throw-in', goalKick: 'Goal kick', corner: 'Corner', freeKick: 'Free kick', penalty: 'Penalty' };
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(labels[r.type] || r.type, px, py - 12);
+}
+
+// P2.7: เส้น trail ของบอลตอนยิง/จ่าย/เด้ง
+function drawBallTrail(ctx, state) {
+  if (state.phase !== 'simulating') return;
+  const tr = state.ball.trail;
+  if (!Array.isArray(tr) || tr.length < 2) return;
+  for (let i = 1; i < tr.length; i++) {
+    const a = tr[i - 1], b = tr[i];
+    ctx.beginPath();
+    ctx.moveTo(toPx(a.x), toPy(a.y) - (a.z || 0) * 2);
+    ctx.lineTo(toPx(b.x), toPy(b.y) - (b.z || 0) * 2);
+    ctx.strokeStyle = `rgba(247,244,233,${0.08 + (i / tr.length) * 0.32})`;
+    ctx.lineWidth = 1 + (i / tr.length) * 1.5;
+    ctx.stroke();
+  }
+}
+
+// P2.7: ไฮไลต์โซน second ball เมื่อมี loose ball ที่ต้องแย่งกัน
+function drawSecondBallZone(ctx, state) {
+  if (state.phase !== 'simulating' || !state.sim?.secondBall || !state.ball.isLoose) return;
+  const b = state.ball;
+  ctx.beginPath();
+  ctx.arc(toPx(b.x), toPy(b.y), 6.5 * SCALE, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(242,201,76,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 6]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// P2.7: บอล loose กระพริบ/วงขยายให้สังเกตง่าย
+function drawLooseBallPulse(ctx, state) {
+  if (state.phase !== 'simulating' || !state.ball.isLoose) return;
+  const b = state.ball;
+  const t = (performance.now() % 800) / 800;
+  const r = (5 + t * 9);
+  ctx.beginPath();
+  ctx.arc(toPx(b.x), toPy(b.y) - (b.z || 0) * 2, r, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,230,120,${0.5 * (1 - t)})`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+// P2.7: ป้าย Deflect / Rebound / Parry / Loose ตรงจุดที่เกิด
+function drawBallFxLabel(ctx, state) {
+  const fx = state.sim?.ballFx;
+  if (state.phase !== 'simulating' || !fx) return;
+  ctx.fillStyle = 'rgba(255,220,120,0.95)';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(fx.label, toPx(fx.x), toPy(fx.y) - 18);
 }
 
 // P5: Fog of War — เห็นคู่แข่งเฉพาะที่อยู่ใกล้นักเตะเรา/บอล (แนว Graph Imputer)
@@ -339,9 +449,9 @@ export function updateFog(state) {
   for (const p of state.players) {
     if (p.team !== 'away') continue;
     if (isOpponentVisible(state, p)) {
-      p.lastSeen = { x: p.x, y: p.y, clock: state.clock };
+      p.lastSeen = { x: p.x, y: p.y, turn: state.turn };
     } else if (!p.lastSeen) {
-      p.lastSeen = { x: p.x, y: p.y, clock: state.clock }; // เห็นครั้งแรกตอนเปิดโหมด
+      p.lastSeen = { x: p.x, y: p.y, turn: state.turn }; // เห็นครั้งแรกตอนเปิดโหมด
     }
   }
 }
@@ -351,7 +461,7 @@ function drawFogGhosts(ctx, state) {
   if (!state.ui.fogOfWar) return;
   for (const p of state.players) {
     if (p.team !== 'away' || isOpponentVisible(state, p) || !p.lastSeen) continue;
-    const turnsLost = Math.max(0, (state.clock - p.lastSeen.clock) / 8);
+    const turnsLost = Math.max(0, state.turn - (p.lastSeen.turn ?? state.turn));
     const uncertainty = Math.min(3 + turnsLost * 2.5, 12) * SCALE * 0.4;
     const px = toPx(p.lastSeen.x), py = toPy(p.lastSeen.y);
     ctx.beginPath();

@@ -43,6 +43,21 @@ export function drawPitch(ctx) {
   ctx.strokeStyle = '#ffffff';
   line(ctx, toPx(0) - 5, toPy(34 - 3.66), toPx(0) - 5, toPy(34 + 3.66));
   line(ctx, toPx(PITCH.length) + 5, toPy(34 - 3.66), toPx(PITCH.length) + 5, toPy(34 + 3.66));
+
+  // P2.8: ส่วนโค้งมุมสนาม (corner arc) ทั้งสี่มุม
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = COLORS.line;
+  const cr = 1 * SCALE;
+  cornerArc(ctx, toPx(0), toPy(0), cr, 0, Math.PI / 2);
+  cornerArc(ctx, toPx(PITCH.length), toPy(0), cr, Math.PI / 2, Math.PI);
+  cornerArc(ctx, toPx(0), toPy(PITCH.width), cr, -Math.PI / 2, 0);
+  cornerArc(ctx, toPx(PITCH.length), toPy(PITCH.width), cr, Math.PI, Math.PI * 1.5);
+}
+
+function cornerArc(ctx, x, y, r, a, b) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, a, b);
+  ctx.stroke();
 }
 
 function drawBox(ctx, side) {

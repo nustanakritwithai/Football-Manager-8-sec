@@ -4,15 +4,27 @@
 
 import {
   PITCH, TICKS_PER_TURN, TICK_DT, TURN_SECONDS,
-  PATH_SAMPLE_EVERY, MAX_HISTORY, MATCH_TURNS,
+  PATH_SAMPLE_EVERY, MAX_HISTORY, MATCH_TURNS, HALF_TURNS, MATCH_SECONDS, HALFTIME_STAMINA_BOOST,
   MIN_PLAYER_SPACING, SEPARATION_FORCE, CONGESTION_GRID, CONGESTION_LIMIT,
   CARRY_SPACE_THRESHOLD, DRIBBLE_PRESSURE_MAX, PASS_MEMORY_SIZE,
+  PLAYER_TOUCH_RADIUS, PLAYER_BLOCK_RADIUS, BALL_REACH_HEIGHT, DEFLECTION_NOISE,
+  SECOND_BALL_RADIUS, FIRST_TOUCH_LOOSE, FIRST_TOUCH_CLEAN,
+  POST_HIT_CHANCE, POST_REBOUND_POWER, GK_HOLD_CHANCE, GK_PARRY_POWER, GK_PARRY_CENTER_CHANCE,
+  GOAL_HALF_WIDTH, CROSSBAR_HEIGHT, PENALTY_AREA_DEPTH, PENALTY_AREA_HALF_WIDTH,
+  PENALTY_SPOT_DISTANCE, SIX_YARD_DEPTH, FOUL_BASE_RATE, FOUL_PRESSURE_WEIGHT,
+  YELLOW_CARD_THRESHOLD, TACKLE_RADIUS, TACKLE_BASE_CHANCE,
+  GOAL_HEIGHT, SHOT_XG_MIN, SHOT_XG_MAX, BIG_CHANCE_XG, LONG_SHOT_MAX_XG,
+  GK_BASE_REACH, GK_REACTION_WEIGHT, SHOT_TARGET_ERROR_BASE, SHOT_PRESSURE_ERROR,
+  POST_CHANCE_MAX, REBOUND_CHANCE_BASE,
 } from './config.js';
 import { clamp, dist, distP, lerp, pointSegDist, rand } from './utils.js';
-import { maxSpeed, movementRadius } from './player.js';
-import { giveBall, startPass, makeLoose } from './ball.js';
-import { attackDir, goalAttackedBy, teamPlayers, getPlayer } from './team.js';
-import { recordEvent, kickoff, isMatchOver } from './state.js';
+import { maxSpeed, movementRadius, firstTouchAttr, reactionAttr } from './player.js';
+import {
+  giveBall, startPass, makeLoose, createRebound, stepLooseBall, reflectVelocity,
+  markLastTouch, placeBallAtRestartSpot, markShotLastTouch,
+} from './ball.js';
+import { attackDir, goalAttackedBy, goalDefendedBy, teamPlayers, getPlayer } from './team.js';
+import { recordEvent, recordStructuredEvent, kickoff, isMatchOver } from './state.js';
 import { analyze } from './tacticalAnalyzer.js';
 import { generateAdvice } from './aiAssistant.js';
 import { epvGain, epvValue } from './pitchControl.js';
@@ -24,6 +36,14 @@ import { collectPassSample, predictPass } from './learning.js';
 export function startSimulation(state) {
   if (state.phase !== 'planning') return false;
   if (state.pendingPenalty) return false; // ต้องตัดสินจุดโทษก่อน
+
+  state.structuredEvents = [];
+
+  // P2.8: ถ้ามี restart ค้างอยู่ (dead ball เทิร์นก่อน) → วางบอล/จัดตำแหน่งตามกติกาก่อนเริ่มเล่น
+  if (state.restart) {
+    executeRestart(state);
+  }
+  state.playState = 'live';
 
   // ล็อกคำสั่ง: intended target (clamp ตาม radius อีกรอบ) → targetX/Y ของเทิร์นนี้
   for (const p of state.players) {
@@ -60,15 +80,20 @@ export function startSimulation(state) {
     possessionStart: state.possessionTeam,
     pendingPass: null,        // { fromId, startX, toRunner }
     justReceived: new Map(),  // playerId -> tick ที่เพิ่งได้บอล (first-time shot bonus)
+    holdCount: new Map(),     // playerId -> จำนวนครั้งที่เลือก hold ติดกัน (กันถือบอลค้างทั้งเทิร์น)
     stats: {
-      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
-      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0 },
+      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
+      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0, crosses: 0, shotsOnTarget: 0, xg: 0, saves: 0, blocks: 0, posts: 0 },
     },
     congestion: null,
     lastAction: null,         // ป้าย action ล่าสุดของผู้ถือบอล (แสดงบนสนาม)
     pressEvents: 0,
     carryEventLogged: false,
     goalScored: false,
+    // P2.7: ball physics state
+    ballFx: null,             // { label, x, y, ttl } ป้ายชั่วคราว (Deflect/Rebound/Parry/Loose)
+    secondBall: null,         // { mode, team } loose ball ที่รอ second-ball contest
+    contestLogged: false,     // กัน log "Second ball contest" ซ้ำ
   };
 
   updatePhases(state);
@@ -109,8 +134,22 @@ function finishSimulation(state) {
     p.commandLocked = false;
   }
 
-  state.clock += TURN_SECONDS;
+  // นาฬิกาแมตช์ 90 นาที: แต่ละเทิร์น (action 8 วิ) เดินนาฬิกาแมตช์ทีละก้อน
+  // เพื่อให้ครบ 0→45:00 (พักครึ่ง เทิร์น 40) และ →90:00 (จบ เทิร์น 80)
+  const turnStartClock = Math.round(((state.turn - 1) / MATCH_TURNS) * MATCH_SECONDS);
+  state.clock = Math.round((state.turn / MATCH_TURNS) * MATCH_SECONDS);
+  if (!sim.endedByRestart) state.playState = 'live';
   state.lastTurnStats = { ...sim.stats.home };
+
+  // P2.8/fix: ติดตามการครองบอลยืดเยื้อ — ถ้าทีมเดิมครองต่อเนื่องโดยไม่มีการยิง = stall
+  // ใช้เร่ง pressing ของอีกฝ่ายให้แย่งบอลคืน กัน "ติด DEFENDING/midBlock วนไม่จบ"
+  {
+    const poss = state.possessionTeam;
+    const hadShot = (sim.stats.home.shots + sim.stats.away.shots) > 0;
+    const prev = state.possessionStreak;
+    if (!prev || prev.team !== poss || hadShot) state.possessionStreak = { team: poss, turns: 1 };
+    else state.possessionStreak = { team: poss, turns: prev.turns + 1 };
+  }
 
   const analysis = analyze(state);
   state.tacticalScores = analysis.scores;
@@ -131,7 +170,7 @@ function finishSimulation(state) {
 
   state.history.push({
     turnNumber: state.turn,
-    startClock: state.clock - TURN_SECONDS,
+    startClock: turnStartClock,
     endClock: state.clock,
     startingPositions: sim.startSnapshot,
     endingPositions: snapshotPositions(state),
@@ -172,9 +211,23 @@ function finishSimulation(state) {
   state.phase = isMatchOver(state) ? 'finished' : 'planning';
   state.ui.scoresDirty = true;
 
+  // พักครึ่ง: หลังจบเทิร์นที่ HALF_TURNS (40) → ครึ่งหลัง, ฟื้น stamina บางส่วน, คู่แข่งเขี่ยบอล
+  if (state.turn === HALF_TURNS + 1 && state.half === 1 && state.phase !== 'finished') {
+    state.half = 2;
+    for (const p of state.players) p.stamina = clamp(p.stamina + HALFTIME_STAMINA_BOOST, 0, 100);
+    state.restart = makeRestart('kickoff', 'away', { x: PITCH.length / 2, y: 34 }, null, 'secondHalf');
+    state.playState = 'halftime';
+    recordEvent(state, 'Half Time — second half kick-off to Away');
+    recordStructuredEvent(state, { type: 'HALF_TIME', team: 'away' });
+    state.assistant.messages.unshift({
+      severity: 'info',
+      text: 'พักครึ่ง (45\') — นักเตะฟื้น stamina บางส่วน ครึ่งหลังคู่แข่งเป็นฝ่ายเขี่ยบอล กด Play เพื่อเริ่มครึ่งหลัง',
+    });
+  }
+
   if (state.phase === 'finished') {
     state.assistant.messages.unshift({
-      text: `จบแมตช์! สกอร์ ${state.score.home}-${state.score.away} (${MATCH_TURNS} เทิร์น) — ครองบอลรวมฝั่งเรา ${possessionPercent(state)}%`,
+      text: `จบแมตช์ (Full Time)! สกอร์ ${state.score.home}-${state.score.away} — ครองบอลรวมฝั่งเรา ${possessionPercent(state)}%`,
       severity: 'info',
     });
   }
@@ -268,6 +321,8 @@ export function evaluateTeamObjective(state, teamId) {
   const t = state.teams[teamId];
   const b = state.ball;
 
+  // บอลหลุดเป็น loose ball = 50/50 ทั้งสองทีมต้องวิ่งแย่ง (ไม่ใช่ยืน midBlock เฉย ๆ)
+  if (b.isLoose) return 'recoverBall';
   if (phase === 'DEFENDING') return t.pressingLevel >= 4 ? 'highPress' : 'midBlock';
   if (phase === 'TRANSITION_TO_DEFENSE') return 'recoverShape';
   if (phase === 'TRANSITION_TO_ATTACK') return 'counterAttack';
@@ -293,13 +348,11 @@ function updatePhases(state) {
   state.teamPhases.away = evaluateTeamPhase(state, 'away');
 }
 
-function updateObjectives(state, logEvent = false) {
-  const prev = state.teamObjectives.home;
+function updateObjectives(state, _logEvent = false) {
   state.teamObjectives.home = evaluateTeamObjective(state, 'home');
   state.teamObjectives.away = evaluateTeamObjective(state, 'away');
-  if (logEvent || state.teamObjectives.home !== prev) {
-    recordEvent(state, `Objective: ${state.teamObjectives.home} (${state.teamPhases.home})`);
-  }
+  // หมายเหตุ: ไม่ log "Objective: ..." ลง event log อีกต่อไป — เป็นข้อมูล coaching
+  // ที่แสดงบนแดชบอร์ด (teamPhase) อยู่แล้ว การ log ทุกเทิร์นทำให้ event log รก/ดูเหมือนวนซ้ำ
 }
 
 // ---------- AI คู่แข่งวางแผนก่อนเทิร์น ----------
@@ -352,9 +405,11 @@ function stepTick(state) {
   if (sim.tick % 5 === 0) sim.congestion = buildCongestion(state);
 
   updateBall(state);
+  if (sim.forceEnd) return; // P2.8: บอลตาย (goal/out/foul) → หยุดเทิร์นทันที
 
   const owner = state.ball.ownerPlayerId ? getPlayer(state, state.ball.ownerPlayerId) : null;
   if (owner) decideCarrier(state, owner);
+  if (sim.forceEnd) return; // เช่น ยิงเข้าประตูระหว่างตัดสินใจ
 
   for (const p of state.players) movePlayer(state, p, owner);
 
@@ -363,6 +418,10 @@ function stepTick(state) {
     const dir = attackDir(o.team);
     state.ball.x = clamp(o.x + dir * 0.8, 0.5, PITCH.length - 0.5);
     state.ball.y = o.y;
+    // fix: เขี่ย/แย่งบอลจากผู้ถือบอลที่พักบอล → บอลกระเด้งออก (กันบอลค้างนิ่งใน midblock)
+    if (resolveTackle(state, o)) return;
+    // P2.8: ฟาวล์จากการเข้าปะทะผู้ถือบอล → free kick / penalty
+    if (checkFoul(state, o)) return;
   }
 
   if (state.possessionTeam) sim.possessionTicks[state.possessionTeam]++;
@@ -395,6 +454,11 @@ function zoneCrowd(state, team, x, y) {
 
 function updateBall(state) {
   const b = state.ball;
+  pushTrail(state, b);
+  if (state.sim?.ballFx) {
+    state.sim.ballFx.ttl -= 1;
+    if (state.sim.ballFx.ttl <= 0) state.sim.ballFx = null;
+  }
 
   if (b.inFlight) {
     const d = dist(b.x, b.y, b.targetX, b.targetY);
@@ -402,15 +466,33 @@ function updateBall(state) {
 
     // บอลโด่ง (cross) ลอยข้ามหัว — ตัดกลางทางไม่ได้ ไปวัดกันตอนบอลตก
     const aerial = !!state.sim.pendingPass?.cross;
+    // วาดความสูงของลูกโด่ง (cosmetic): พาราโบลาตามระยะที่เดินทางไป
+    if (aerial) {
+      const pp = state.sim.pendingPass;
+      const sx = pp?.startX ?? b.x, sy = pp?.startY ?? b.y;
+      const total = dist(sx, sy, b.targetX, b.targetY);
+      const t = total > 0.5 ? clamp(1 - d / total, 0, 1) : 1;
+      b.z = Math.sin(t * Math.PI) * clamp(total * 0.18, 2, 9);
+    }
     for (const p of state.players) {
       if (aerial) break;
       if (p.team === b.lastTouchTeam) continue;
-      if (distP(p, b) < 1.2 && Math.random() < 0.16 + p.positioning / 300) {
-        labelPendingPass(state, 0);
-        giveBall(state, p);
-        recordEvent(state, `Interception by ${p.team === 'home' ? 'our' : 'their'} ${p.role} (#${p.number})`);
-        noteTurnover(state, p.team);
-        return;
+      if (distP(p, b) < 1.2) {
+        // ชิงบอล: ตัดเรียบ (clean intercept) หรือแฉลบ (deflection) สำหรับบอลแรง
+        if (Math.random() < 0.16 + p.positioning / 300) {
+          labelPendingPass(state, 0);
+          giveBall(state, p);
+          recordEvent(state, `Interception by ${p.team === 'home' ? 'our' : 'their'} ${p.role} (#${p.number})`);
+          noteTurnover(state, p.team);
+          return;
+        }
+        // บอลพุ่งแรงผ่านจ่อตัว → แฉลบเป็น loose ball (ไม่ใช่ตัดได้สะอาด)
+        // โอกาสต่ำต่อ tick เพื่อไม่ให้บอลเด้งมั่วเหมือน pinball
+        if (b.flightSpeed > 19 && distP(p, b) < PLAYER_BLOCK_RADIUS && Math.random() < 0.1) {
+          labelPendingPass(state, 0);
+          deflectInFlightOff(state, p);
+          return;
+        }
       }
     }
 
@@ -418,6 +500,7 @@ function updateBall(state) {
       b.x = b.targetX;
       b.y = b.targetY;
       b.inFlight = false;
+      b.z = 0;
       resolvePassArrival(state);
     } else {
       b.x += ((b.targetX - b.x) / d) * step;
@@ -427,21 +510,505 @@ function updateBall(state) {
   }
 
   if (b.isLoose) {
-    b.x = clamp(b.x + b.velocityX * TICK_DT, 0.5, PITCH.length - 0.5);
-    b.y = clamp(b.y + b.velocityY * TICK_DT, 0.5, PITCH.width - 0.5);
-    b.velocityX *= 0.92;
-    b.velocityY *= 0.92;
+    stepLooseBall(b);
+    // P2.8: บอลข้ามเส้นประตู (goal) หรือออกสนาม (throw-in/goal kick/corner) → dead ball
+    if (checkGoalAndOut(state)) return;
+    resolveLooseRecovery(state);
+  }
+}
 
-    let nearest = null, best = Infinity;
+// ---------- P2.8: Goal / Ball-out detection ----------
+
+// pure: จัดประเภทเหตุการณ์บอลตายจากตำแหน่ง + ผู้สัมผัสล่าสุด (ทดสอบได้ตรง ๆ)
+// คืน { kind, team, side, spot } หรือ null ถ้าบอลยังอยู่ในสนาม
+export function classifyDeadBall(ball) {
+  const b = ball;
+  const inGoalMouth = b.y > 34 - GOAL_HALF_WIDTH && b.y < 34 + GOAL_HALF_WIDTH && (b.z || 0) < CROSSBAR_HEIGHT;
+
+  if (b.x >= PITCH.length && inGoalMouth) return { kind: 'goal', team: 'home' };
+  if (b.x <= 0 && inGoalMouth) return { kind: 'goal', team: 'away' };
+
+  // ออกหลังฝั่งขวา (ประตูฝั่ง away)
+  if (b.x > PITCH.length) {
+    const sideY = b.y < 34 ? 'top' : 'bottom';
+    return b.lastTouchTeam === 'home'
+      ? { kind: 'goalKick', team: 'away', side: 'right', spot: { x: PITCH.length - SIX_YARD_DEPTH, y: b.y < 34 ? 28 : 40 } }
+      : { kind: 'corner', team: 'home', side: sideY, spot: { x: PITCH.length, y: b.y < 34 ? 0 : PITCH.width } };
+  }
+  // ออกหลังฝั่งซ้าย (ประตูฝั่ง home)
+  if (b.x < 0) {
+    const sideY = b.y < 34 ? 'top' : 'bottom';
+    return b.lastTouchTeam === 'away'
+      ? { kind: 'goalKick', team: 'home', side: 'left', spot: { x: SIX_YARD_DEPTH, y: b.y < 34 ? 28 : 40 } }
+      : { kind: 'corner', team: 'away', side: sideY, spot: { x: 0, y: b.y < 34 ? 0 : PITCH.width } };
+  }
+  // ออกเส้นข้าง = throw-in ให้ทีมตรงข้ามคนที่สัมผัสล่าสุด
+  if (b.y < 0 || b.y > PITCH.width) {
+    return {
+      kind: 'throwIn',
+      team: b.lastTouchTeam === 'home' ? 'away' : 'home',
+      side: b.y < 0 ? 'top' : 'bottom',
+      spot: { x: clamp(b.x, 1, PITCH.length - 1), y: b.y < 0 ? 0 : PITCH.width },
+    };
+  }
+  return null;
+}
+
+// คืน true ถ้าบอลกลายเป็น dead ball (เทิร์นจะถูกหยุด)
+function checkGoalAndOut(state) {
+  const res = classifyDeadBall(state.ball);
+  if (!res) return false;
+  if (res.kind === 'goal') { handleGoal(state, res.team); return true; }
+  createRestartEvent(state, res.kind, res.team, res.spot, res.side);
+  return true;
+}
+
+// จุด goal kick ของทีมที่เล่น (ในกรอบ 6 หลาของตัวเอง)
+function backLineSpot(state, sideOut, _isCorner) {
+  // sideOut = เส้นที่บอลออก; goal kick เล่นจากกรอบของทีมรับฝั่งนั้น
+  const x = sideOut === 'right' ? PITCH.length - SIX_YARD_DEPTH : SIX_YARD_DEPTH;
+  const y = state.ball.y < 34 ? 34 - 6 : 34 + 6;
+  return { x, y: clamp(y, 10, PITCH.width - 10) };
+}
+
+function handleGoal(state, scoringTeam) {
+  state.score[scoringTeam]++;
+  if (state.matchStats?.[scoringTeam]) state.matchStats[scoringTeam].goals++;
+  if (state.sim) state.sim.goalScored = true;
+  const concede = scoringTeam === 'home' ? 'away' : 'home';
+  recordEvent(state, `GOAL!!! ${scoringTeam === 'home' ? state.teams.home.teamName : state.teams.away.teamName} scores!`);
+  recordStructuredEvent(state, { type: 'GOAL', team: scoringTeam, text: 'Goal' });
+  stopForRestart(state, makeRestart('kickoff', concede, { x: PITCH.length / 2, y: 34 }, null, 'goal'), 'goalCelebration');
+}
+
+// สร้าง restart + log + หยุดเทิร์น (ใช้ตอนบอลออก)
+function createRestartEvent(state, type, team, spot, side) {
+  const labels = {
+    goalKick: 'Goal kick', corner: 'Corner', throwIn: 'Throw-in', freeKick: 'Free kick',
+  };
+  const who = team === 'home' ? 'Home' : 'Away';
+  const sideTxt = side ? ` on the ${side}` : '';
+  recordEvent(state, `${labels[type] || type} to ${who}${sideTxt}`);
+  recordStructuredEvent(state, { type: restartEventType(type), team, spot, side, text: `${labels[type]} to ${who}` });
+  stopForRestart(state, makeRestart(type, team, spot, side, 'ballOut'), 'deadBall');
+}
+
+function restartEventType(type) {
+  return { goalKick: 'BALL_OUT_GOAL_KICK', corner: 'BALL_OUT_CORNER', throwIn: 'BALL_OUT_THROW_IN', freeKick: 'FREE_KICK', penalty: 'PENALTY' }[type] || 'RESTART';
+}
+
+function makeRestart(type, team, spot, side, reason) {
+  return {
+    type, team,
+    spot: { x: clamp(spot.x, 0, PITCH.length), y: clamp(spot.y, 0, PITCH.width) },
+    side: side ?? null,
+    reason: reason ?? null,
+    takerId: null,
+    createdAtClock: 0,
+  };
+}
+
+// หยุด simulation ทันที เก็บ restart ไว้ให้เทิร์นถัดไป execute
+function stopForRestart(state, restart, playState = 'deadBall') {
+  state.restart = restart;
+  state.playState = playState;
+  if (state.sim) {
+    state.sim.forceEnd = true;
+    state.sim.endedByRestart = true;
+  }
+}
+
+// ---------- P2.8: Restart execution (เริ่มเล่นใหม่ตามกติกา) ----------
+
+export function executeRestart(state) {
+  const r = state.restart;
+  if (!r) return;
+  switch (r.type) {
+    case 'kickoff': restartAfterGoal(state, r.team); break;
+    case 'goalKick': setupGoalKick(state, r); break;
+    case 'corner': setupCorner(state, r); break;
+    case 'throwIn': setupThrowIn(state, r); break;
+    case 'freeKick': setupFreeKick(state, r); break;
+    case 'penalty': resolvePenaltyRestart(state, r); break;
+    default: break;
+  }
+  recordStructuredEvent(state, { type: 'SET_PIECE_TAKEN', team: r.team, restart: r.type });
+  state.restart = null;
+}
+
+function nearestTeammateTo(state, team, spot, excludeGK = true) {
+  let best = null, bd = Infinity;
+  for (const p of teamPlayers(state, team)) {
+    if (excludeGK && p.role === 'GK') continue;
+    const d = dist(p.x, p.y, spot.x, spot.y);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best || teamPlayers(state, team)[0];
+}
+
+function setupGoalKick(state, r) {
+  const gk = teamPlayers(state, r.team).find((p) => p.role === 'GK');
+  const taker = gk || nearestTeammateTo(state, r.team, r.spot);
+  taker.x = r.spot.x; taker.y = r.spot.y;
+  placeBallAtRestartSpot(state.ball, r.spot.x, r.spot.y);
+  giveBall(state, taker);
+}
+
+function setupThrowIn(state, r) {
+  const taker = nearestTeammateTo(state, r.team, r.spot);
+  taker.x = clamp(r.spot.x, 1, PITCH.length - 1);
+  taker.y = clamp(r.spot.y, 0.5, PITCH.width - 0.5);
+  placeBallAtRestartSpot(state.ball, taker.x, taker.y);
+  giveBall(state, taker);
+}
+
+function setupFreeKick(state, r) {
+  const taker = nearestTeammateTo(state, r.team, r.spot);
+  taker.x = clamp(r.spot.x, 1, PITCH.length - 1);
+  taker.y = clamp(r.spot.y, 1, PITCH.width - 1);
+  placeBallAtRestartSpot(state.ball, taker.x, taker.y);
+  giveBall(state, taker);
+}
+
+function setupCorner(state, r) {
+  const dir = attackDir(r.team);
+  const goalX = r.team === 'home' ? PITCH.length : 0;
+  const taker = nearestTeammateTo(state, r.team, r.spot);
+  // ดันตัวเป้าเข้า box (ST/CB ตัวสูง/AM/CM) — basic set piece shape
+  const targets = teamPlayers(state, r.team)
+    .filter((p) => p.role !== 'GK' && p.id !== taker.id && ['ST', 'CB', 'AM', 'CM'].includes(p.role))
+    .slice(0, 4);
+  const boxX = clamp(goalX - dir * 9, 6, PITCH.length - 6);
+  targets.forEach((p, i) => {
+    p.x = boxX;
+    p.y = clamp(28 + i * 4, 18, 50);
+    p.targetX = p.x; p.targetY = p.y;
+    p.runType = null; p.runTarget = null;
+  });
+  taker.x = r.spot.x; taker.y = r.spot.y;
+  taker.targetX = r.spot.x; taker.targetY = r.spot.y;
+  placeBallAtRestartSpot(state.ball, r.spot.x, r.spot.y);
+  giveBall(state, taker);
+}
+
+// penalty: auto-resolve ที่จังหวะเริ่มเล่น (MVP) — เข้า/เซฟ/rebound
+function resolvePenaltyRestart(state, r) {
+  const atk = r.team;
+  const def = atk === 'home' ? 'away' : 'home';
+  const shooter = teamPlayers(state, atk)
+    .filter((p) => p.role !== 'GK')
+    .sort((a, b) => b.shooting - a.shooting)[0];
+  const gk = teamPlayers(state, def).find((p) => p.role === 'GK');
+  const goal = goalAttackedBy(atk);
+  recordEvent(state, `Penalty to ${atk === 'home' ? 'Home' : 'Away'}!`);
+
+  bumpMatch(state, atk, 'shots');
+  bumpMatch(state, atk, 'shotsOnTarget');
+  const scoreChance = clamp(0.62 + (shooter.shooting - (gk?.positioning ?? 60)) / 300, 0.5, 0.85);
+  if (Math.random() < scoreChance) {
+    state.score[atk]++;
+    if (state.matchStats?.[atk]) state.matchStats[atk].goals++;
+    recordEvent(state, `Penalty scored by ${atk === 'home' ? 'our' : 'their'} ${shooter.role}!`);
+    recordStructuredEvent(state, { type: 'GOAL', team: atk, text: 'Penalty goal' });
+    restartAfterGoal(state, def); // เล่นต่อเป็น kickoff ของทีมเสียประตู
+  } else {
+    // เซฟ/ชนเสา → rebound loose หรือ GK ได้บอล
+    placeBallAtRestartSpot(state.ball, goal.x - attackDir(atk) * 6, 34);
+    if (gk && Math.random() < 0.5) {
+      recordEvent(state, `Penalty saved by ${def === 'home' ? 'our' : 'their'} GK!`);
+      giveBall(state, gk);
+    } else {
+      recordEvent(state, 'Penalty saved — rebound loose');
+      makeLoose(state, -attackDir(atk) * rand(3, 7), rand(-4, 4), rand(0, 2), 'rebound');
+      markSecondBall(state, 'rebound', atk);
+    }
+  }
+}
+
+// ---------- P2.8: Foul system ----------
+
+function isInPenaltyArea(x, y, defendingTeam) {
+  const inY = y > 34 - PENALTY_AREA_HALF_WIDTH && y < 34 + PENALTY_AREA_HALF_WIDTH;
+  if (!inY) return false;
+  return defendingTeam === 'home' ? x < PENALTY_AREA_DEPTH : x > PITCH.length - PENALTY_AREA_DEPTH;
+}
+
+// โอกาสฟาวล์ต่อ tick — มาจาก context ไม่ใช่สุ่มล้วน
+export function evaluateFoulRisk(state, tackler, carrier, pressure) {
+  const dir = attackDir(carrier.team);
+  // อยู่ใกล้กรอบตัวเอง = panic ขึ้น
+  const ownGoalX = tackler.team === 'home' ? 0 : PITCH.length;
+  const nearOwnGoal = Math.abs(tackler.x - ownGoalX) < 25 ? 0.4 : 0;
+  const fatigue = (1 - tackler.stamina / 100) * 0.5;
+  const aggro = tackler.aggression / 100;
+  const beaten = (carrier.x - tackler.x) * dir > 0.3 ? 0.4 : 0; // โดนเลี้ยงผ่าน/อยู่หลัง
+  const skill = (tackler.tackling * 0.6 + tackler.positioning * 0.4) / 100;
+  const discipline = tackler.discipline / 100;
+
+  let risk = FOUL_BASE_RATE * 0.4
+    + pressure * FOUL_PRESSURE_WEIGHT * 0.05
+    + aggro * 0.02
+    + fatigue * 0.015
+    + beaten * 0.025
+    + nearOwnGoal * 0.015
+    - skill * 0.03
+    - discipline * 0.025;
+  return clamp(risk, 0, 0.05);
+}
+
+function foulSeverity(state, tackler, carrier) {
+  const dir = attackDir(carrier.team);
+  const beaten = (carrier.x - tackler.x) * dir > 0.3 ? 0.3 : 0; // ฟาวล์จากด้านหลัง/โดนผ่าน
+  const dangerous = tackler.aggression / 100 * 0.3;
+  const tacticalFoul = state.teamPhases[carrier.team] === 'TRANSITION_TO_ATTACK' ? 0.25 : 0; // หยุดเคาน์เตอร์
+  return clamp(0.2 + beaten + dangerous + tacticalFoul + rand(0, 0.2) - tackler.discipline / 100 * 0.2, 0, 1);
+}
+
+// fix: แย่ง/เขี่ยบอลจากผู้ถือบอลที่ "พักบอล/บังบอล" (ไม่ได้พาบอลหนีเร็ว)
+// กันบอลค้างนิ่งใน midblock — ทำให้บอลกระเด้งออกเป็น loose ball / เปลี่ยนมือ
+function resolveTackle(state, carrier) {
+  if (carrier.role === 'GK') return false;
+  const sim = state.sim;
+  if (sim.tick % 3 !== 0) return false; // ตรวจเป็นจังหวะ ไม่ใช่ทุก tick
+  // ยกเว้นตอนกำลัง carry/dribble (มี contest ของตัวเองอยู่แล้ว)
+  const move = sim.carrierMove.get(carrier.id);
+  if (move && (move.mode === 'carry' || move.mode === 'dribble')) return false;
+
+  let tk = null, best = TACKLE_RADIUS;
+  for (const o of state.players) {
+    if (o.team === carrier.team || o.role === 'GK') continue;
+    const d = distP(o, carrier);
+    if (d < best) { best = d; tk = o; }
+  }
+  if (!tk) return false;
+
+  const control = (carrier.decision * 0.4 + carrier.passing * 0.3 + carrier.stamina * 0.3) / 100;
+  const chance = clamp(
+    TACKLE_BASE_CHANCE + (tk.tackling / 100) * 0.06 + (tk.aggression / 100) * 0.02 - control * 0.05,
+    0.01, 0.16
+  );
+  if (Math.random() >= chance) return false;
+
+  const dx = carrier.x - tk.x, dy = carrier.y - tk.y;
+  const mag = Math.hypot(dx, dy) || 1;
+  const who = tk.team === 'home' ? 'Our' : 'Their';
+  if (Math.random() < 0.55) {
+    // เขี่ยหลุด — บอลกระเด้งออกจากจุดปะทะ
+    makeLoose(state,
+      (dx / mag) * rand(4, 8) + rand(-2, 2),
+      (dy / mag) * rand(4, 8) + rand(-2, 2),
+      rand(0, 2), 'loose');
+    markLastTouch(state.ball, tk);
+    markSecondBall(state, 'loose', tk.team);
+    setBallFx(state, 'Tackle!');
+    recordEvent(state, `${who} ${tk.role} pokes the ball loose with a tackle`);
+  } else {
+    giveBall(state, tk);
+    recordEvent(state, `${who} ${tk.role} wins the ball with a tackle`);
+    noteTurnover(state, tk.team);
+  }
+  return true;
+}
+
+// ตรวจฟาวล์เมื่อ defender จ่อผู้ถือบอล — คืน true ถ้าเกิดฟาวล์ (เทิร์นถูกหยุด)
+function checkFoul(state, carrier) {
+  if (carrier.role === 'GK') return false;
+  // ตรวจฟาวล์เป็นจังหวะ (ทุก ~1 วินาที) ไม่ใช่ทุก tick เพื่อไม่ให้ฟาวล์ถี่เกิน
+  if (state.sim.tick % 10 !== 0) return false;
+  let tackler = null, best = 1.5;
+  for (const o of state.players) {
+    if (o.team === carrier.team || o.role === 'GK') continue;
+    const d = distP(o, carrier);
+    if (d < best) { best = d; tackler = o; }
+  }
+  if (!tackler) return false;
+
+  const pressure = computePressure(state, carrier);
+  if (pressure < 0.7) return false; // ต้องมีการปะทะจริง ไม่ใช่ยืนเฉย
+  if (Math.random() >= evaluateFoulRisk(state, tackler, carrier, pressure)) return false;
+
+  // Advantage (simplified): ทีมบุกยังได้เปรียบใน final third พื้นที่โล่ง → ปล่อยเล่นต่อ
+  const dir = attackDir(carrier.team);
+  const progress = dir === 1 ? carrier.x : PITCH.length - carrier.x;
+  if (progress > 72 && pressure < 1.2 && Math.random() < 0.5) {
+    recordEvent(state, `Advantage played — ${carrier.team === 'home' ? 'we' : 'they'} keep going`);
+    recordStructuredEvent(state, { type: 'ADVANTAGE', team: carrier.team });
+    return false;
+  }
+
+  commitFoul(state, tackler, carrier);
+  return true;
+}
+
+function commitFoul(state, tackler, carrier) {
+  state.foulCount[tackler.team] = (state.foulCount[tackler.team] || 0) + 1;
+  const who = tackler.team === 'home' ? 'our' : 'their';
+
+  // card (MVP: yellow เท่านั้น ยังไม่ไล่ออก)
+  const sev = foulSeverity(state, tackler, carrier);
+  if (sev > YELLOW_CARD_THRESHOLD) {
+    state.cards.yellow.push({ playerId: tackler.id, team: tackler.team, clock: Math.round(state.clock) });
+    recordEvent(state, `Yellow card for ${who} ${tackler.role} (#${tackler.number})`);
+    recordStructuredEvent(state, { type: 'YELLOW_CARD', team: tackler.team, playerId: tackler.id });
+  }
+
+  const inBox = isInPenaltyArea(carrier.x, carrier.y, tackler.team);
+  if (inBox) {
+    const dir = attackDir(carrier.team);
+    const spot = { x: dir === 1 ? PITCH.length - PENALTY_SPOT_DISTANCE : PENALTY_SPOT_DISTANCE, y: 34 };
+    recordEvent(state, `Foul in the box by ${who} ${tackler.role} — PENALTY!`);
+    recordStructuredEvent(state, { type: 'FOUL', team: tackler.team, playerId: tackler.id });
+    stopForRestart(state, makeRestart('penalty', carrier.team, spot, null, 'foul'), 'deadBall');
+  } else {
+    recordEvent(state, `Free kick — foul by ${who} ${tackler.role} (#${tackler.number})`);
+    recordStructuredEvent(state, { type: 'FOUL', team: tackler.team, playerId: tackler.id });
+    stopForRestart(state, makeRestart('freeKick', carrier.team, { x: carrier.x, y: carrier.y }, null, 'foul'), 'deadBall');
+  }
+}
+
+// trail บอลสำหรับวาด (เก็บเฉพาะตอน sim, จำกัดความยาว)
+function pushTrail(state, b) {
+  if (!Array.isArray(b.trail)) b.trail = [];
+  b.trail.push({ x: b.x, y: b.y, z: b.z || 0 });
+  if (b.trail.length > 10) b.trail.shift();
+}
+
+// ป้าย FX ชั่วคราวบนสนาม (Deflect/Rebound/Parry/Loose ...)
+function setBallFx(state, label) {
+  if (!state.sim) return;
+  state.sim.ballFx = { label, x: state.ball.x, y: state.ball.y, ttl: 16 };
+}
+
+// บอลในเที่ยวบินถูกแฉลบโดยผู้เล่น p → กลายเป็น loose ball ตามมุมสะท้อน
+function deflectInFlightOff(state, p) {
+  const b = state.ball;
+  const d = dist(b.x, b.y, b.targetX, b.targetY) || 1;
+  const vx = ((b.targetX - b.x) / d) * b.flightSpeed;
+  const vy = ((b.targetY - b.y) / d) * b.flightSpeed;
+  const r = reflectVelocity(vx, vy, b.x - p.x, b.y - p.y, DEFLECTION_NOISE);
+  b.inFlight = false;
+  makeLoose(state, r.x * 0.55, r.y * 0.55, rand(1.5, 4), 'deflected');
+  b.lastTouchTeam = p.team;
+  b.lastTouchPlayerId = p.id;
+  b.spin = rand(-0.4, 0.4);
+  markSecondBall(state, 'deflected', p.team);
+  setBallFx(state, 'Deflect');
+  recordEvent(state, `Ball deflected by ${p.team === 'home' ? 'our' : 'their'} ${p.role} (#${p.number})`);
+  state.sim.pendingPass = null;
+}
+
+// ทำเครื่องหมายว่า loose ball นี้เป็นจังหวะ second-ball ที่ต้องแย่งกัน
+function markSecondBall(state, mode, team) {
+  if (!state.sim) return;
+  state.sim.secondBall = { mode, team };
+  state.sim.contestLogged = false;
+}
+
+// ---------- P2.7: Second ball / loose ball recovery ----------
+
+// คุณภาพการสัมผัสบอลแรก (0..1) — บอลแรง/บอลเด้ง/โดนบีบ ทำให้จับยาก
+// ลูกจ่ายง่ายในพื้นที่โล่งต้องรับได้เกือบแน่นอน → โทษเฉพาะบอลเร็ว/เด้ง/โดนบีบ
+export function firstTouchQuality(p, ball, pressure = 0) {
+  const speed = Math.hypot(ball.velocityX || 0, ball.velocityY || 0) || ball.flightSpeed || 0;
+  const ballSpeedPenalty = clamp((speed - 18) / 45, 0, 0.28); // เริ่มลงโทษเมื่อบอลแรงกว่า pass ปกติ
+  const pressurePenalty = clamp(pressure * 0.1, 0, 0.3);
+  const bouncePenalty = clamp((ball.z || 0) / 4, 0, 0.2);
+  const base = (firstTouchAttr(p) * (0.7 + 0.3 * p.stamina / 100)) / 100;
+  return clamp(base - ballSpeedPenalty - pressurePenalty - bouncePenalty, 0, 1);
+}
+
+// คะแนนชิง second ball — ไม่ใช่แค่ใกล้สุดชนะ ต้องดูความเร็ว/ตำแหน่ง/โมเมนตัม/ความล้า
+export function secondBallScore(state, p, ball) {
+  const d = distP(p, ball);
+  const distanceScore = clamp(1 - d / SECOND_BALL_RADIUS, 0, 1);
+  const speedScore = (p.speed / 100) * 0.5 + (reactionAttr(p) / 100) * 0.5;
+  const positioningScore = p.positioning / 100;
+  const aggressionScore = p.aggression / 100;
+  const fatiguePenalty = (1 - p.stamina / 100) * 0.35;
+
+  // โมเมนตัม: กำลังหันหน้าเข้าหาบอลอยู่แล้วหรือไม่
+  let momentum = 0;
+  const mv = dist(p.x, p.y, p.targetX, p.targetY);
+  if (mv > 0.5) {
+    const toBallX = ball.x - p.x, toBallY = ball.y - p.y;
+    const tb = Math.hypot(toBallX, toBallY) || 1;
+    const dirX = (p.targetX - p.x) / mv, dirY = (p.targetY - p.y) / mv;
+    momentum = clamp((dirX * toBallX + dirY * toBallY) / tb, -0.3, 1) * 0.4;
+  }
+
+  // pressure รอบตัว p (โดนประกบทำให้แย่งยาก)
+  let pressurePenalty = 0;
+  for (const o of state.players) {
+    if (o.team === p.team) continue;
+    const od = distP(o, p);
+    if (od < 4) pressurePenalty += (1 - od / 4) * 0.15;
+  }
+
+  return distanceScore * 1.3 + speedScore * 0.35 + positioningScore * 0.3
+    + aggressionScore * 0.15 + momentum - fatiguePenalty - pressurePenalty;
+}
+
+// บอล loose: ผู้เล่นที่เอื้อมถึง (อยู่ใกล้พอ + บอลไม่สูงเกิน) แย่งกัน คนชนะตามคะแนน
+function resolveLooseRecovery(state) {
+  const b = state.ball;
+  const sim = state.sim;
+
+  // log จังหวะ second-ball contest เมื่อมีคนจากทั้งสองทีมรุมเข้าจุดตกบอล
+  if (sim && sim.secondBall && !sim.contestLogged) {
+    const near = state.players.filter((p) => p.role !== 'GK' && distP(p, b) < 9);
+    const teams = new Set(near.map((p) => p.team));
+    if (near.length >= 3 && teams.size === 2) {
+      sim.contestLogged = true;
+      const box = b.x > PITCH.length - 22 || b.x < 22;
+      recordEvent(state, box ? 'Second ball contest near the box' : 'Second ball contest in midfield');
+      setBallFx(state, 'Loose Ball');
+    }
+  }
+
+  // เอื้อมถึงเฉพาะบอลที่ไม่สูงเกินหัว
+  if ((b.z || 0) > BALL_REACH_HEIGHT) return;
+
+  const reach = PLAYER_TOUCH_RADIUS + b.radius;
+  let contenders = state.players.filter((p) => distP(p, b) < reach);
+  // safety net: บอลเกือบหยุดนิ่งแต่ไม่มีใครเอื้อมถึงพอดี (เช่นคร่อมกันอยู่)
+  // → ให้คนใกล้สุดที่อยู่ในระยะ ~2.6m เก็บได้ กันบอลติดค้างตรงกลาง
+  if (!contenders.length && Math.hypot(b.velocityX, b.velocityY) < 0.6) {
+    let nearest = null, bd = 2.6;
     for (const p of state.players) {
+      if (p.role === 'GK' && distP(p, b) > 1.71) continue;
       const d = distP(p, b);
-      if (d < best) { best = d; nearest = p; }
+      if (d < bd) { bd = d; nearest = p; }
     }
-    if (nearest && best < 1.1) {
-      giveBall(state, nearest);
-      state.sim?.justReceived.set(nearest.id, state.sim.tick);
-      recordEvent(state, `${nearest.team === 'home' ? 'Our' : 'Their'} ${nearest.role} recovered loose ball`);
+    if (nearest) contenders = [nearest];
+  }
+  if (!contenders.length) return;
+
+  // เลือกผู้ชนะตามคะแนน second-ball (ใกล้สุดไม่ใช่ผู้ชนะเสมอ)
+  let winner = contenders[0], bestScore = -Infinity;
+  for (const p of contenders) {
+    const s = secondBallScore(state, p, b) + (p.role === 'GK' ? 0.2 : 0);
+    if (s > bestScore) { bestScore = s; winner = p; }
+  }
+
+  // บอลที่ยังพุ่งแรงอาจคุมไม่อยู่ในสัมผัสแรก (เว้นแต่จะอยู่จ่อมาก)
+  const speed = Math.hypot(b.velocityX, b.velocityY);
+  if (speed > 9 && distP(winner, b) > 0.9 && Math.random() > 0.5) return;
+
+  const second = sim?.secondBall;
+  giveBall(state, winner);
+  sim?.justReceived.set(winner.id, sim.tick);
+
+  if (second) {
+    sim.secondBall = null;
+    const who = winner.team === 'home' ? 'Our' : 'Their';
+    if (second.mode === 'rebound' || second.mode === 'parried') {
+      recordEvent(state, `${who} ${winner.role} reacts first to the loose ball`);
+    } else {
+      recordEvent(state, `${who} ${winner.role} wins the second ball`);
     }
+    if (winner.team !== second.team) noteTurnover(state, winner.team);
+  } else {
+    recordEvent(state, `${winner.team === 'home' ? 'Our' : 'Their'} ${winner.role} recovered loose ball`);
   }
 }
 
@@ -462,22 +1029,70 @@ function resolvePassArrival(state) {
   if (nearest && best < 3.0) {
     const sameTeam = nearest.team === b.lastTouchTeam;
     labelPendingPass(state, sameTeam ? 1 : 0);
-    giveBall(state, nearest);
-    state.sim?.justReceived.set(nearest.id, state.sim.tick);
     if (sameTeam) {
-      state.sim.stats[nearest.team].passes++;
-      updatePassMemory(state, nearest);
-      recordEvent(state, `Pass completed → ${nearest.role} (#${nearest.number}, ${nearest.team === 'home' ? 'us' : 'them'})`);
+      // P2.7: first touch — รับดี/กระฉอก/หลุดเป็น loose ตามคุณภาพการสัมผัส
+      handleFirstTouch(state, nearest);
     } else {
+      giveBall(state, nearest);
+      state.sim?.justReceived.set(nearest.id, state.sim.tick);
       recordEvent(state, `Pass failed — won by their ${nearest.role}`);
       noteTurnover(state, nearest.team);
     }
   } else {
     labelPendingPass(state, 0);
-    b.isLoose = true;
+    // บอลพลาดเป้า → loose ball ที่ยังไหลต่อ (ให้ทั้งสองทีมวิ่งแย่ง ไม่ใช่บอลตายนิ่ง)
+    const pp = state.sim.pendingPass;
+    const sx = pp?.startX ?? b.x, sy = pp?.startY ?? b.y;
+    const dx = b.x - sx, dy = b.y - sy;
+    const mag = Math.hypot(dx, dy) || 1;
+    makeLoose(state, (dx / mag) * rand(3, 6), (dy / mag) * rand(3, 6), rand(0, 1.5), 'loose');
+    markSecondBall(state, 'loose', b.lastTouchTeam);
     recordEvent(state, 'Pass failed — ball loose');
   }
   state.sim.pendingPass = null;
+}
+
+// P2.7: คุณภาพการรับบอลแรกสัมผัสของผู้รับฝ่ายเดียวกัน
+function handleFirstTouch(state, receiver) {
+  const b = state.ball;
+  const pressure = computePressure(state, receiver);
+  const q = firstTouchQuality(receiver, b, pressure);
+  const role = receiver.role;
+
+  if (q >= FIRST_TOUCH_CLEAN) {
+    giveBall(state, receiver);
+    state.sim.stats[receiver.team].passes++;
+    updatePassMemory(state, receiver);
+    state.sim.justReceived.set(receiver.id, state.sim.tick);
+    recordEvent(state, `Pass completed → ${role} (#${receiver.number}, ${receiver.team === 'home' ? 'us' : 'them'})`);
+  } else if (q >= FIRST_TOUCH_LOOSE) {
+    // กระฉอก 1–3 เมตร: ผู้รับยังตามเก็บได้ แต่เสียจังหวะ
+    state.sim.stats[receiver.team].passes++;
+    updatePassMemory(state, receiver);
+    const dir = attackDir(receiver.team);
+    const ang = rand(-0.9, 0.9);
+    const spill = rand(1.5, 3.5);
+    b.x = clamp(receiver.x + dir * spill * Math.cos(ang), 0.5, PITCH.length - 0.5);
+    b.y = clamp(receiver.y + spill * Math.sin(ang), 0.5, PITCH.width - 0.5);
+    makeLoose(state, (b.x - receiver.x) * 1.3, (b.y - receiver.y) * 1.3, 0, 'loose');
+    b.lastTouchTeam = receiver.team;
+    b.lastTouchPlayerId = receiver.id;
+    markSecondBall(state, 'loose', receiver.team);
+    setBallFx(state, 'Heavy touch');
+    recordEvent(state, `Heavy first touch by ${receiver.team === 'home' ? 'our' : 'their'} ${role} — ball loose`);
+  } else {
+    // จับบอลลั่น: บอลหลุดออกไกลขึ้น คู่แข่งใกล้สุดมีโอกาสแย่ง
+    const ang = rand(0, Math.PI * 2);
+    const spill = rand(3, 6);
+    b.x = clamp(receiver.x + Math.cos(ang) * spill, 0.5, PITCH.length - 0.5);
+    b.y = clamp(receiver.y + Math.sin(ang) * spill, 0.5, PITCH.width - 0.5);
+    makeLoose(state, Math.cos(ang) * spill * 1.6, Math.sin(ang) * spill * 1.6, rand(0, 2), 'loose');
+    b.lastTouchTeam = receiver.team;
+    b.lastTouchPlayerId = receiver.id;
+    markSecondBall(state, 'loose', receiver.team);
+    setBallFx(state, 'Poor touch');
+    recordEvent(state, `Poor first touch by ${receiver.team === 'home' ? 'our' : 'their'} ${role} — ball loose`);
+  }
 }
 
 // เก็บตัวอย่างการจ่ายของทีมเราไว้ฝึก pass model (P5)
@@ -528,9 +1143,17 @@ function decideCarrier(state, carrier) {
   const move = sim.carrierMove.get(carrier.id);
   if (move && move.mode !== 'hold') {
     const reached = dist(carrier.x, carrier.y, move.x, move.y) < 1.2;
-    if (!reached && pressure < 1.6) return;
+    // anti-stuck: ถ้าพาบอลแต่แทบไม่ขยับ (โดน role-zone ดึงกลับ/ติดขอบ) หลายจังหวะ
+    // ให้ล้ม carry แล้วตัดสินใจใหม่ (จ่าย/อื่นๆ) เพื่อไม่ให้บอลค้างอยู่กับที่
+    const moved = dist(carrier.x, carrier.y, move._px ?? carrier.x, move._py ?? carrier.y);
+    move._stuck = moved < 0.25 ? (move._stuck || 0) + 1 : 0;
+    move._px = carrier.x; move._py = carrier.y;
+    if (!reached && pressure < 1.6 && move._stuck < 6) return;
+    const wasStuck = move._stuck >= 6;
     sim.carrierMove.delete(carrier.id);
     sim.cooldowns.set(carrier.id, 0); // ตัดสินใจทันที
+    // พาบอลแล้วค้างอยู่กับที่ (โดนดึงกลับโซน/ติดขอบ) → บังคับรีไซเคิลบอลออกไป ไม่ให้บอลแช่
+    if (wasStuck) { forceRecycle(state, carrier, pressure); return; }
   }
 
   const cd = sim.cooldowns.get(carrier.id) ?? rand(0.2, 0.6);
@@ -543,8 +1166,30 @@ function decideCarrier(state, carrier) {
   const action = evaluateBallCarrierAction(state, carrier, pressure);
   executeCarrierAction(state, carrier, action, pressure);
   carrier.currentAction = action.type;
+  // นับ hold ติดกัน → เทิร์นถัดไปจะถูกลดน้ำหนัก ไม่ให้ยืนถือบอลค้างทั้งเทิร์น
+  if (action.type === 'hold') sim.holdCount.set(carrier.id, (sim.holdCount.get(carrier.id) || 0) + 1);
+  else sim.holdCount.delete(carrier.id);
   sim.lastAction = { type: action.type, playerId: carrier.id };
   sim.cooldowns.set(carrier.id, decisionDelay(carrier, pressure));
+}
+
+// บังคับเอาบอลออกจากเท้าเมื่อ carry ค้าง — จ่ายตัวที่ดีที่สุด ถ้าไม่มีก็เขี่ยไปข้างหน้า
+function forceRecycle(state, carrier, pressure) {
+  const opts = passOptions(state, carrier, pressure);
+  if (opts.length) {
+    executePass(state, carrier, opts[0], pressure);
+    carrier.currentAction = 'pass';
+    state.sim.lastAction = { type: 'pass', playerId: carrier.id };
+  } else {
+    const dir = attackDir(carrier.team);
+    makeLoose(state, dir * rand(6, 12), rand(-5, 5), rand(0, 2), 'loose');
+    markLastTouch(state.ball, carrier);
+    markSecondBall(state, 'loose', carrier.team);
+    carrier.currentAction = 'clear';
+    state.sim.lastAction = { type: 'clear', playerId: carrier.id };
+    recordEvent(state, `${carrier.team === 'home' ? 'Our' : 'Their'} ${carrier.role} knocks it forward to keep play moving`);
+  }
+  state.sim.cooldowns.set(carrier.id, decisionDelay(carrier, pressure));
 }
 
 export function evaluateBallCarrierAction(state, carrier, pressure) {
@@ -556,6 +1201,11 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const dGoal = distP(carrier, goal);
   const inAttThird = dir === 1 ? carrier.x > 70 : carrier.x < 35;
   const acts = [];
+
+  // fix: ครองบอลยืดเยื้อหลายเทิร์นโดยไม่คืบ → เร่งให้ "ลองของ" (carry/จ่ายหน้า) แทนการพักบอล
+  // กันเกมติดวน DEFENDING/midBlock เพราะอีกฝ่ายเก็บบอลนิ่ง ๆ
+  const streak = state.possessionStreak;
+  const stale = (streak && streak.team === carrier.team) ? clamp(streak.turns - 2, 0, 5) : 0;
 
   // --- SHOOT (P2.6: finishing instinct + zone logic) ---
   const shot = evaluateShotAction(state, carrier, pressure);
@@ -621,7 +1271,7 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const space = openSpaceAhead(state, carrier);
   if (pressure < 1.1 && space > CARRY_SPACE_THRESHOLD) {
     const ability = carryAbility(carrier);
-    let s = 0.32 + clamp(space / 28, 0, 0.32) + ability * 0.22 - pressure * 0.2;
+    let s = 0.32 + clamp(space / 28, 0, 0.32) + ability * 0.22 - pressure * 0.2 + stale * 0.08;
     if (objective.startsWith('progress') || objective === 'counterAttack' || objective.startsWith('attackHalfSpace')) s += 0.12;
     if (objective === 'holdPossession') s -= 0.1;
     if (carrier.role === 'CB' && phase === 'BUILD_UP') s -= 0.08; // CB carry ได้แต่ระวัง
@@ -660,6 +1310,9 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   if (inAttThird) holdScore -= 0.12;
   if (shot?.zone === 'must') holdScore -= 0.2;
   if (dGoal < 25 && pressure > 0.8) holdScore -= 0.15;
+  holdScore -= stale * 0.12; // ครองนานเกินไป (ข้ามเทิร์น) อย่าพักบอลอีก
+  // กันถือบอลค้างทั้งเทิร์น: ยิ่ง hold ติดกันยิ่งไม่น่าเลือก → บังคับให้รีไซเคิล/พาบอล
+  holdScore -= (state.sim?.holdCount?.get(carrier.id) || 0) * 0.2;
   acts.push({ type: 'hold', score: holdScore });
 
   // --- CLEAR: เคลียร์เมื่อเสี่ยงหน้ากรอบตัวเอง ---
@@ -844,7 +1497,7 @@ export function evaluateCrossAction(state, carrier, pressure, shot) {
 
 function executeCross(state, carrier, action) {
   const sim = state.sim;
-  sim.pendingPass = { fromId: carrier.id, startX: state.ball.x, features: null, cross: true };
+  sim.pendingPass = { fromId: carrier.id, startX: state.ball.x, startY: state.ball.y, features: null, cross: true };
   // บอลโด่ง: ความแม่นต่ำกว่าบอลเรียบ และ early ball ยิ่งเสี่ยง
   const errMag = (1 - carrier.passing / 140) * rand(1, 5) + (action.early ? 1 : 0);
   const ang = rand(0, Math.PI * 2);
@@ -1009,10 +1662,30 @@ function executeCarrierAction(state, carrier, action, pressure) {
     case 'clear': {
       const dir = attackDir(carrier.team);
       const cx = carrier.x + dir * rand(18, 30);
-      const cy = clamp(carrier.y + rand(-14, 14), 2, PITCH.width - 2);
-      makeLoose(state, (cx - carrier.x) * 0.9, (cy - carrier.y) * 0.9);
+      // เคลียร์กว้าง: บางลูกหลุดออกเส้นข้าง = throw-in (จงใจไม่ clamp ในสนาม)
+      const cy = carrier.y + rand(-24, 24);
+      // P2.7: เคลียร์ = บอลโด่งกระเด็น (มี z) ไม่ใช่ teleport เป็น loose
+      makeLoose(state, (cx - carrier.x) * 0.7, (cy - carrier.y) * 0.7, rand(4, 7), 'loose');
       state.ball.lastTouchTeam = carrier.team;
-      recordEvent(state, `${carrier.team === 'home' ? 'Our' : 'Their'} ${carrier.role} cleared under pressure`);
+      state.ball.lastTouchPlayerId = carrier.id;
+      markSecondBall(state, 'loose', carrier.team);
+      // ริคโคเชต: มีตัวคู่แข่งจ่อหน้า → บอลแฉลบไม่ขาด
+      const blocker = state.players.find(
+        (o) => o.team !== carrier.team && o.role !== 'GK'
+          && distP(o, carrier) < 2.5 && (o.x - carrier.x) * dir > -0.5
+      );
+      if (blocker && Math.random() < 0.45) {
+        const r = reflectVelocity(state.ball.velocityX, state.ball.velocityY,
+          state.ball.x - blocker.x, state.ball.y - blocker.y, DEFLECTION_NOISE);
+        makeLoose(state, r.x, r.y, rand(2, 5), 'deflected');
+        state.ball.lastTouchTeam = blocker.team;
+        state.ball.lastTouchPlayerId = blocker.id;
+        markSecondBall(state, 'deflected', blocker.team);
+        setBallFx(state, 'Ricochet');
+        recordEvent(state, `Clearance ricocheted off ${blocker.team === 'home' ? 'our' : 'their'} ${blocker.role}`);
+      } else {
+        recordEvent(state, `${carrier.team === 'home' ? 'Our' : 'Their'} ${carrier.role} cleared under pressure`);
+      }
       break;
     }
   }
@@ -1162,27 +1835,207 @@ function executePass(state, owner, option, pressure) {
   }
 }
 
-function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
-  const angleFactor = clamp(1 - Math.abs(owner.y - 34) / 22, 0.15, 1);
-  const prob = clamp(
-    0.5 * (1 - dGoal / 32) * (owner.shooting / 85) * angleFactor / (1 + pressure * 0.8),
-    0.02, 0.45
-  );
-  state.sim.stats[owner.team].shots++;
-  const zoneNote = zone === 'must' || zone === 'good' ? ' (good position)' : '';
-  recordEvent(state, `Shot chance! ${owner.team === 'home' ? 'Our' : 'Their'} ${owner.role} shoots from ${Math.round(dGoal)}m${zoneNote}`);
+// ---------- P2.9: Finishing Engine ----------
+// 6 ชั้น: context → xG → target → block → GK reach → outcome
+// แกนกันสกอร์ล้น: โอกาสเข้าผูกกับ xG (คุณภาพโอกาส) ส่วน GK/block/placement กำหนด "รูปแบบผล"
 
-  if (Math.random() < prob) {
-    state.score[owner.team]++;
-    state.sim.goalScored = true;
-    recordEvent(state, `GOAL!!! ${owner.team === 'home' ? state.teams.home.teamName : state.teams.away.teamName} scores!`);
-    restartAfterGoal(state, owner.team === 'home' ? 'away' : 'home');
+function bumpMatch(state, team, key, n = 1) {
+  const m = state.matchStats?.[team];
+  if (m) m[key] = (m[key] || 0) + n;
+}
+
+// 1) Shot context
+export function evaluateShotContext(state, shooter, pressure = 0, gk = null) {
+  const goal = goalAttackedBy(shooter.team);
+  const dGoal = distP(shooter, goal);
+  const angle = goalOpenAngle(shooter, shooter.team);
+  const blockers = countBlockers(state, shooter, shooter.team);
+  const central = clamp(1 - Math.abs(shooter.y - 34) / 22, 0, 1);
+  const keeper = gk || teamPlayers(state, shooter.team === 'home' ? 'away' : 'home').find((p) => p.role === 'GK');
+  const keeperOffLine = keeper ? clamp(Math.abs(keeper.x - goal.x) - 1, 0, 10) : 0;
+  // 1v1: ใกล้ประตู ไม่มีกองหลังขวาง
+  const isOneOnOne = dGoal < 18 && blockers === 0 && central > 0.55;
+  return {
+    dGoal, angle, pressure, blockers, central,
+    isTightAngle: angle < 0.18,
+    isOneOnOne,
+    keeperOutOfPosition: clamp(keeperOffLine / 8, 0, 1),
+    zone: dGoal > 24 ? 'long' : dGoal > 17 ? 'edge' : angle < 0.18 ? 'tight' : dGoal < 12 && central > 0.5 ? 'big' : 'box',
+  };
+}
+
+// 2) xG — สอบเทียบกับช่วงจริง (long 0.02-0.06, box 0.12-0.30, big 0.30-0.55, tight 0.04-0.16)
+export function calculateXG(ctx, shooter) {
+  const distanceScore = clamp(1 - ctx.dGoal / 28, 0, 1);
+  const angleScore = clamp(ctx.angle / 0.7, 0, 1);
+  const shooterQuality = shooter.shooting / 100;
+  let xg = distanceScore * 0.28
+    + angleScore * 0.22
+    + ctx.central * 0.09
+    + shooterQuality * 0.11
+    + ctx.keeperOutOfPosition * 0.07
+    + (ctx.isOneOnOne ? 0.08 : 0)
+    - clamp(ctx.pressure * 0.05, 0, 0.18)
+    - clamp(ctx.blockers * 0.045, 0, 0.18);
+  if (ctx.dGoal > 24) xg = Math.min(xg, LONG_SHOT_MAX_XG);
+  if (ctx.isTightAngle) xg = Math.min(xg, 0.16);
+  return clamp(xg, SHOT_XG_MIN, SHOT_XG_MAX);
+}
+
+// 3) Shot target selection — เลือกโซนกรอบประตู + ความแม่น (กันยิงกลางประตูตลอด)
+export function chooseShotTarget(ctx, shooter) {
+  const aim = clamp(
+    0.5 + shooter.shooting / 250
+    - ctx.pressure * SHOT_PRESSURE_ERROR
+    - (ctx.isTightAngle ? 0.12 : 0)
+    - clamp((ctx.dGoal - 12) / 55, 0, 0.22)
+    - SHOT_TARGET_ERROR_BASE * 0.5,
+    0.2, 0.85
+  );
+  const cornered = clamp(aim * rand(0.5, 1.15), 0, 1); // วางมุมได้ดีแค่ไหน
+  let zone;
+  if (cornered > 0.62) zone = rand(0, 1) < 0.5 ? 'low corner' : 'top corner';
+  else if (cornered > 0.36) zone = rand(0, 1) < 0.6 ? 'low corner' : 'near post';
+  else zone = 'central';
+  return { aim, cornered, zone };
+}
+
+// 4) Block check — กองหลังในเส้นยิง
+function checkShotBlock(state, owner, goal) {
+  let best = null;
+  for (const o of state.players) {
+    if (o.team === owner.team || o.role === 'GK') continue;
+    if ((o.x - owner.x) * (goal.x - owner.x) <= 0) continue;
+    const ld = pointSegDist(o.x, o.y, owner.x, owner.y, goal.x, 34);
+    if (ld < 2.2 && (!best || ld < best.laneDist)) best = { def: o, laneDist: ld };
+  }
+  if (!best) return null;
+  best.blockChance = clamp(
+    0.4
+    + (best.def.tackling / 100) * 0.2
+    + (1 - best.laneDist / 2.2) * 0.3
+    - (owner.shooting / 100) * 0.15,
+    0.1, 0.85
+  );
+  return best;
+}
+
+// 5) GK save flavor (เมื่อรู้แล้วว่าไม่ใช่ goal และอยู่ในกรอบ) → held/parried/rebound
+function resolveSaveFlavor(gk, owner, target) {
+  if (!gk) return 'rebound';
+  const holdChance = clamp(
+    (gk.positioning / 100) * 0.45
+    + (1 - target.cornered) * 0.4
+    - (owner.shooting / 100) * 0.2,
+    0.2, 0.75
+  );
+  if (Math.random() < holdChance) return 'held';
+  // ยิงเข้ามุม → ปัดออกข้าง (corner) ; ยิงกลาง → กระฉอกหน้าเขต (rebound)
+  return target.cornered > 0.45 ? 'parried' : 'rebound';
+}
+
+function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
+  const sim = state.sim;
+  const dir = attackDir(owner.team);
+  const goal = goalAttackedBy(owner.team);
+  const ours = owner.team === 'home';
+  const who = ours ? 'Our' : 'Their';
+  const defTeam = ours ? 'away' : 'home';
+  const gk = teamPlayers(state, defTeam).find((p) => p.role === 'GK');
+
+  // 1) context + 2) xG
+  const ctx = evaluateShotContext(state, owner, pressure, gk);
+  const xg = calculateXG(ctx, owner);
+  markShotLastTouch(state.ball, owner);
+  sim.stats[owner.team].shots++;
+  sim.stats[owner.team].xg += xg;
+  bumpMatch(state, owner.team, 'shots');
+  bumpMatch(state, owner.team, 'xg', xg);
+  const isBig = xg >= BIG_CHANCE_XG;
+  if (isBig) bumpMatch(state, owner.team, 'bigChances');
+  recordEvent(state, `Shot chance! ${who} ${owner.role} from ${Math.round(dGoal)}m (xG ${xg.toFixed(2)})${isBig ? ' [BIG CHANCE]' : ''}`);
+  recordStructuredEvent(state, { type: 'SHOT', team: owner.team, xg: +xg.toFixed(2), zone: ctx.zone });
+
+  const cornerSpot = { x: goal.x, y: owner.y < 34 ? 0 : PITCH.width };
+  const cornerSide = owner.y < 34 ? 'top' : 'bottom';
+  const bylineSide = dir === 1 ? 'right' : 'left';
+  const target = chooseShotTarget(ctx, owner);
+
+  // === GOAL ผูกกับ xG (คุมสกอร์ด้วยคุณภาพโอกาส ไม่ใช่โกลโกง) ===
+  if (Math.random() < xg) {
+    sim.stats[owner.team].shotsOnTarget++;
+    bumpMatch(state, owner.team, 'shotsOnTarget');
+    setBallFx(state, 'GOAL');
+    recordEvent(state, `Shot — ${target.zone} — GOAL! (${who} ${owner.role})`);
+    handleGoal(state, owner.team); // นับ matchStats.goals ภายใน
+    return;
+  }
+
+  // === ไม่เข้า: ตัดสินว่าเพราะอะไร (block / post / save / wide) ===
+
+  // 4) block
+  const block = checkShotBlock(state, owner, goal);
+  if (block && Math.random() < block.blockChance) {
+    const defWho = block.def.team === 'home' ? 'our' : 'their';
+    sim.stats[block.def.team].blocks++;
+    bumpMatch(state, block.def.team, 'blocks');
+    setBallFx(state, 'Blocked');
+    if (Math.random() < 0.45) {
+      recordEvent(state, `Shot blocked by ${defWho} ${block.def.role} — out for a corner`);
+      createRestartEvent(state, 'corner', owner.team, cornerSpot, cornerSide);
+    } else {
+      const sp = clamp(18 + owner.shooting * 0.13, 18, 31);
+      const r = reflectVelocity(dir * sp, 0, block.def.x - owner.x, block.def.y - owner.y, DEFLECTION_NOISE);
+      createRebound(state, block.def.x, block.def.y, r.x * 0.5, r.y * 0.5, rand(1.5, 4));
+      markLastTouch(state.ball, block.def);
+      markSecondBall(state, 'rebound', block.def.team);
+      recordEvent(state, `Shot blocked by ${defWho} ${block.def.role} — rebound loose`);
+    }
+    return;
+  }
+
+  // 2b) post/bar — ลูกคุณภาพดีที่พลาดขอบกรอบนิดเดียว
+  const postChance = clamp(POST_CHANCE_MAX * (xg / 0.4), 0.01, POST_CHANCE_MAX);
+  if (Math.random() < postChance) {
+    const sp = clamp(18 + owner.shooting * 0.13, 18, 31);
+    const px = clamp(goal.x - dir * 1.2, 1, PITCH.length - 1);
+    const py = 34 + (owner.y < 34 ? -1 : 1) * 3.4;
+    bumpMatch(state, owner.team, 'posts');
+    sim.stats[owner.team].posts++;
+    createRebound(state, px, py, -dir * sp * POST_REBOUND_POWER, rand(-4, 4), rand(1, 3));
+    state.ball.spin = rand(-0.4, 0.4);
+    markSecondBall(state, 'rebound', owner.team);
+    setBallFx(state, 'Post!');
+    recordEvent(state, 'Shot hits the post — rebound!');
+    return;
+  }
+
+  // 5) on target (saved) vs off target (wide) — ความแม่นจาก target.aim
+  if (!gk || Math.random() >= target.aim) {
+    recordEvent(state, isBig ? `Big chance missed — ${who} ${owner.role} shoots wide` : `${who} ${owner.role} shoots wide`);
+    createRestartEvent(state, 'goalKick', defTeam, backLineSpot(state, bylineSide, false), bylineSide);
+    return;
+  }
+
+  // เข้ากรอบแต่ GK เซฟ — แยก held/parried(corner)/rebound(in box)
+  sim.stats[owner.team].shotsOnTarget++;
+  bumpMatch(state, owner.team, 'shotsOnTarget');
+  bumpMatch(state, gk.team, 'saves');
+  sim.stats[gk.team].saves++;
+  const flavor = resolveSaveFlavor(gk, owner, target);
+  setBallFx(state, 'Save');
+  if (flavor === 'held') {
+    recordEvent(state, `Shot ${target.zone} — saved, ${gk.team === 'home' ? 'our' : 'their'} keeper holds it`);
+    giveBall(state, gk);
+  } else if (flavor === 'parried') {
+    recordEvent(state, `Great save! ${gk.team === 'home' ? 'Our' : 'Their'} GK tips the ${target.zone} effort over — corner`);
+    createRestartEvent(state, 'corner', owner.team, cornerSpot, cornerSide);
   } else {
-    const defTeam = owner.team === 'home' ? 'away' : 'home';
-    const gk = teamPlayers(state, defTeam).find((p) => p.role === 'GK');
-    recordEvent(state, Math.random() < 0.5 ? 'Shot saved by keeper' : 'Shot missed the target');
-    if (gk) giveBall(state, gk);
-    else makeLoose(state, -attackDir(owner.team) * 6, rand(-3, 3));
+    const px = clamp(gk.x + dir * 1.5, 1, PITCH.length - 1);
+    createRebound(state, px, gk.y, -dir * GK_PARRY_POWER * 0.6, rand(-4, 4), rand(1.5, 3.5));
+    markLastTouch(state.ball, gk);
+    markSecondBall(state, 'parried', gk.team);
+    recordEvent(state, `${gk.team === 'home' ? 'Our' : 'Their'} GK can't hold it — rebound in the box!`);
   }
 }
 
@@ -1224,10 +2077,13 @@ function movePlayer(state, p, owner) {
     dy += dy > 34 ? -6 : 6;
   }
 
-  // separation: ผลักออกจากเพื่อนที่ใกล้เกิน
-  const sep = separationVector(state, p, owner);
-  dx += sep.x;
-  dy += sep.y;
+  // separation: ผลักออกจากเพื่อนที่ใกล้เกิน — ยกเว้นคนนำที่กำลังพุ่งเก็บ loose ball
+  // (ไม่งั้น separation จะดันให้ห่างบอลจนเก็บไม่ได้ บอลติดค้างตรงกลาง)
+  if (!desired.chaseLead) {
+    const sep = separationVector(state, p, owner);
+    dx += sep.x;
+    dy += sep.y;
+  }
 
   dx = clamp(dx, 0.3, PITCH.length - 0.3);
   dy = clamp(dy, 0.3, PITCH.width - 0.3);
@@ -1343,7 +2199,15 @@ function offBallDesired(state, p, owner) {
     const mates = teamPlayers(state, p.team)
       .filter((m) => m.role !== 'GK')
       .sort((a, c) => distP(a, b) - distP(c, b));
-    if (mates.indexOf(p) < 2) return { x: b.x, y: b.y, urgency: 1, pressing: true };
+    const idx = mates.indexOf(p);
+    // คนใกล้สุดพุ่งเข้าบอลตรง ๆ และ "ไม่ติด separation" จะได้เก็บบอลได้จริง
+    // (กัน bug บอลติดตรงกลางเพราะเพื่อนสองคนถูกดันให้ห่างกันคร่อมบอล)
+    if (idx === 0) return { x: b.x, y: b.y, urgency: 1, pressing: true, chaseLead: true };
+    // คนที่สองวิ่งประกบเฉียงเล็กน้อย (support) ไม่ชนคนแรก
+    if (idx === 1) {
+      const off = p.y < b.y ? -2.5 : 2.5;
+      return { x: b.x, y: clamp(b.y + off, 0.5, PITCH.width - 0.5), urgency: 1, pressing: true };
+    }
   }
 
   // บอลกำลังลอยมาหาทีมเรา: ผู้รับที่ใกล้จุดตกที่สุดวิ่งเข้าไปรับ
@@ -1545,8 +2409,19 @@ function defendingOffBall(state, p, owner, phase) {
     let nPress = team.pressingLevel >= 4 ? 3 : team.pressingLevel >= 2 ? 2 : 1;
     let pressRadius = 10 + team.pressingLevel * 4;
     if (counterPress) { nPress += 1; pressRadius += 5; }
+    // fix: คู่แข่งครองบอลยืดเยื้อหลายเทิร์น (stall) → เร่ง pressing แย่งคืน กัน "ติด midBlock วนไม่จบ"
+    const streak = state.possessionStreak;
+    let stale = 0;
+    if (streak && streak.team === oppOwner.team && streak.turns >= 3) {
+      stale = Math.min(streak.turns - 2, 5); // 1..5
+      nPress += stale >= 1 ? 1 : 0;
+      nPress += stale >= 3 ? 1 : 0;
+      pressRadius += stale * 5;
+    }
     const idx = pressers.indexOf(p);
-    if (idx >= 0 && idx < nPress && distP(p, oppOwner) < pressRadius && p.stamina > 18) {
+    // ครองนานมาก: ตัวที่ใกล้บอลสุดออกจาก block ไปไล่เลย แม้บอลจะอยู่ลึกในแดนคู่แข่ง
+    const forceChase = stale >= 3 && idx === 0;
+    if (idx >= 0 && idx < nPress && (forceChase || distP(p, oppOwner) < pressRadius) && p.stamina > 12) {
       return { x: oppOwner.x, y: oppOwner.y, urgency: 1, pressing: true };
     }
   }

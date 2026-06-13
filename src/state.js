@@ -13,12 +13,25 @@ export function createInitialState(homeFormation = '4-2-3-1') {
   const state = {
     phase: 'planning', // planning | simulating | finished
     turn: 1,
-    clock: 0,          // วินาทีจำลองที่ผ่านไป
+    half: 1,           // ครึ่งการแข่งขัน (1 หรือ 2)
+    clock: 0,          // นาฬิกาแมตช์ (วินาที, แสดง 0→90:00)
     score: { home: 0, away: 0 },
     teams: { home: home.team, away: away.team },
     players: [...home.players, ...away.players],
     ball: createBall(),
     possessionTeam: 'home',
+    // P2.8: match rules & restart state
+    possessionStreak: { team: 'home', turns: 0 }, // กี่เทิร์นติดที่ทีมเดิมครองบอลแบบไม่คืบ (กัน stuck DEFENDING)
+    playState: 'live',     // live | deadBall | setPiece | goalCelebration | finished
+    restart: null,         // { type, team, spot, side, reason, takerId, createdAtClock }
+    structuredEvents: [],   // เหตุการณ์แบบ structured ของเทิร์นล่าสุด
+    foulCount: { home: 0, away: 0 },
+    cards: { yellow: [], red: [] },
+    // P2.9: สถิติการยิงสะสมทั้งแมตช์ (ใช้คุม balance + AI วิเคราะห์)
+    matchStats: {
+      home: { shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 },
+      away: { shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 },
+    },
     tacticalScores: null,
     prevScores: null,
     // P2: tactical intelligence
@@ -68,6 +81,12 @@ export function kickoff(state, team) {
 export function recordEvent(state, text) {
   if (state.lastTurnEvents.length >= MAX_EVENTS_PER_TURN) return;
   state.lastTurnEvents.push(text);
+}
+
+// P2.8: เก็บเหตุการณ์แบบ structured คู่กับ string event (ไว้ให้ UI/analyzer ใช้)
+export function recordStructuredEvent(state, ev) {
+  if (!Array.isArray(state.structuredEvents)) state.structuredEvents = [];
+  state.structuredEvents.push({ clock: Math.round(state.clock), ...ev });
 }
 
 // เปลี่ยน formation ของทีมเรา (ใช้ตอน planning) — จัดตำแหน่งใหม่ตาม preset

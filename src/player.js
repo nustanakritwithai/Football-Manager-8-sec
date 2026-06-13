@@ -63,6 +63,16 @@ export function staminaFactor(p) {
   return 0.55 + 0.45 * (p.stamina / 100);
 }
 
+// P2.7: ทักษะชั่วคราวที่คำนวณจาก attribute เดิม (ยังไม่เพิ่ม field ใหม่)
+// firstTouch = คุณภาพการรับ/จับบอลแรกสัมผัส, reaction = ความเร็วตอบสนอง second ball
+export function firstTouchAttr(p) {
+  return clamp(p.passing * 0.4 + p.decision * 0.3 + p.positioning * 0.3, 0, 100);
+}
+
+export function reactionAttr(p) {
+  return clamp(p.decision * 0.5 + p.speed * 0.3 + p.positioning * 0.2, 0, 100);
+}
+
 export function roleFreedom(p) {
   return ROLE_FREEDOM[p.role] ?? 0.75;
 }

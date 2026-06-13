@@ -4,12 +4,14 @@ import { SAVE_VERSION, STORAGE_KEY, PITCH } from './config.js';
 import { isValidFormation } from './formations.js';
 import { isNum } from './utils.js';
 import { defaultCommand } from './player.js';
+import { ensureBallPhysics } from './ball.js';
 
 export function serialize(state) {
   return {
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
     turn: state.turn,
+    half: state.half ?? 1,
     clock: state.clock,
     phase: state.phase === 'simulating' ? 'planning' : state.phase,
     score: { ...state.score },
@@ -30,6 +32,13 @@ export function serialize(state) {
       commandType: p.commandType ?? null,
     })),
     ball: { ...state.ball },
+    // P2.8: match rules & restart
+    playState: state.playState ?? 'live',
+    restart: state.restart ? { ...state.restart } : null,
+    foulCount: state.foulCount ? { ...state.foulCount } : { home: 0, away: 0 },
+    cards: state.cards ? { yellow: [...state.cards.yellow], red: [...state.cards.red] } : { yellow: [], red: [] },
+    matchStats: state.matchStats ? { home: { ...state.matchStats.home }, away: { ...state.matchStats.away } } : null,
+    possessionStreak: state.possessionStreak ? { ...state.possessionStreak } : null,
     tacticalScores: state.tacticalScores ? { ...state.tacticalScores } : null,
     history: state.history.slice(-10),
     passModel: state.passModel ? { ...state.passModel } : null,
@@ -64,6 +73,7 @@ function bad(error) {
 // รวมข้อมูล save กลับเข้า state ที่มีอยู่ (สร้างจาก createInitialState มาก่อน)
 export function applySave(state, data) {
   state.turn = data.turn;
+  state.half = data.half ?? (data.turn > 40 ? 2 : 1);
   state.clock = data.clock;
   state.phase = data.phase === 'finished' ? 'finished' : 'planning';
   state.score = { home: data.score?.home ?? 0, away: data.score?.away ?? 0 };
@@ -98,6 +108,17 @@ export function applySave(state, data) {
   state.ui.whatIf = false;
 
   Object.assign(state.ball, data.ball);
+  // P2.7: save เก่าที่ยังไม่มี z/velocityZ/spin/ballMode → เติม default กัน crash
+  ensureBallPhysics(state.ball);
+  // P2.8: save เก่าที่ยังไม่มี match-rule state → เติม default (รวมถึง restore ตอน dead ball)
+  state.playState = data.playState ?? 'live';
+  state.restart = data.restart ?? null;
+  state.foulCount = data.foulCount ?? { home: 0, away: 0 };
+  state.cards = data.cards ?? { yellow: [], red: [] };
+  const emptyMatchStats = () => ({ shots: 0, shotsOnTarget: 0, goals: 0, bigChances: 0, xg: 0, saves: 0, blocks: 0, posts: 0, rebounds: 0 });
+  state.matchStats = data.matchStats ?? { home: emptyMatchStats(), away: emptyMatchStats() };
+  state.possessionStreak = data.possessionStreak ?? { team: state.possessionTeam, turns: 0 };
+  state.structuredEvents = [];
   state.tacticalScores = data.tacticalScores || null;
   state.history = Array.isArray(data.history) ? data.history.slice(-10) : [];
   state.lastTurnEvents = [];

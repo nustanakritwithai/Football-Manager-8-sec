@@ -38,7 +38,114 @@ export function analyze(state) {
   // P2.6: ตรวจปัญหาการจบสกอร์ใน final third
   detectFinishingIssues(state, flags);
 
+  // P2.7: ตรวจจังหวะบอลกระเด็น / second ball / first touch
+  detectBallPhysicsIssues(state, flags);
+
+  // P2.8: ตรวจ set piece / foul / restart
+  detectMatchRuleIssues(state, flags);
+
+  // P2.9: ตรวจคุณภาพการจบสกอร์ (finishing engine)
+  detectFinishingQuality(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2.9: finishing quality detections (มุมมองทีมเรา) ----------
+
+function detectFinishingQuality(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const ms = state.matchStats?.home;
+  if (!ms) return;
+
+  flags.bigChanceMissed = events.some((e) => e.startsWith('Big chance missed'));
+
+  // xG สะสมสูงแต่ยังไม่ยิงเข้า = finishing/placement ต่ำ
+  flags.underperformingXg = ms.shots >= 6 && (ms.xg - ms.goals) >= 1.0;
+
+  // เข้ากรอบบ่อยแต่ไม่เป็นประตู = ยิงกลางประตู/โดน GK เซฟง่าย
+  flags.shotsTooCentral = ms.shotsOnTarget >= 5 && ms.goals === 0;
+
+  // ยิงไม่เข้ากรอบเยอะ = placement หลุด/เลือกยิงจังหวะแย่
+  flags.wastefulShooting = ms.shots >= 8 && (ms.shotsOnTarget / ms.shots) < 0.3;
+
+  // GK คู่แข่งแข็งเกิน (เซฟเยอะเทียบ on-target ของเรา) — แต่ต้องมี on-target พอ
+  const awaySaves = state.matchStats?.away?.saves ?? 0;
+  flags.opponentKeeperHot = ms.shotsOnTarget >= 5 && awaySaves >= 4 && ms.goals === 0;
+}
+
+// ---------- P2.8: set piece / foul detections (มุมมองทีมเรา = home) ----------
+
+function detectMatchRuleIssues(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const has = (sub) => events.some((e) => e.includes(sub));
+
+  flags.wonCorner = has('Corner to Home');
+  flags.concededCorner = has('Corner to Away');
+  // เสีย corner แล้วโดนยิงต่อ = ตั้งรับ set piece ไม่ดี
+  flags.concededCornerShot = flags.concededCorner && has('Shot chance! Their');
+  // ได้ corner แล้วได้ยิง = set piece รุกได้ผล
+  flags.cornerCreatedShot = flags.wonCorner && has('Shot chance! Our');
+
+  flags.gotPenalty = has('Penalty to Home') || (has('Foul in the box by their'));
+  flags.concededPenalty = has('Penalty to Away') || (has('Foul in the box by our'));
+  flags.gotFreeKick = events.some((e) => e.startsWith('Free kick') && e.includes('their'));
+  flags.concededFreeKick = events.some((e) => e.startsWith('Free kick') && e.includes('our'));
+  flags.ourYellowCard = events.some((e) => e.startsWith('Yellow card for our'));
+
+  // วินัย: ฟาวล์สะสมของเราเยอะกว่าคู่แข่งชัดเจน
+  const f = state.foulCount || { home: 0, away: 0 };
+  flags.foulProne = f.home >= 4 && f.home - f.away >= 3;
+
+  // restart ที่กำลังรอเล่น (ใช้แนะนำ set piece)
+  flags.pendingRestart = state.restart ? { type: state.restart.type, team: state.restart.team } : null;
+}
+
+// ---------- P2.7: ball physics detections (มุมมองทีมเรา) ----------
+
+function detectBallPhysicsIssues(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const has = (sub) => events.some((e) => e.includes(sub));
+  const count = (sub) => events.filter((e) => e.includes(sub)).length;
+
+  // first touch ของเราหลุด (กระฉอก/จับลั่น)
+  flags.poorFirstTouch = events.some(
+    (e) => (e.startsWith('Heavy first touch by our') || e.startsWith('Poor first touch by our'))
+  );
+
+  // เราสร้างโอกาสซ้ำดาบสอง: ลูกยิงเราโดนบล็อก/ปัด/ชนเสา → rebound ในกรอบ
+  flags.reboundChanceCreated =
+    has('Our shot parried into the box')
+    || (has('Shot blocked by their') && has('Shot chance! Our'))
+    || (has('hits the post') && has('Shot chance! Our'));
+
+  // ได้ rebound แต่เก็บ second ball ไม่ได้ (คู่แข่งเก็บตกก่อน)
+  flags.reboundChanceMissed = flags.reboundChanceCreated
+    && (has('Their') && (has('reacts first to the loose ball') || has('wins the second ball')));
+
+  // อันตรายหน้ากรอบเรา: ลูกยิงคู่แข่งถูกปัด/บล็อกในเขตเรา → บอลเด้งในกรอบ
+  flags.dangerousRebound =
+    has('Their shot parried into the box')
+    || (has('GK parried') && has('Shot chance! Their'));
+
+  // แฉลบอันตราย: บอลแฉลบ/ริคโคเชตของเราในแดนหลัง เปิดทางคู่แข่ง
+  flags.dangerousDeflection =
+    (has('Ball deflected by our') || has('Clearance ricocheted off our'))
+    && (has('Shot chance! Their') || has('Counter risk'));
+
+  // ชนะ/แพ้ second ball: เทียบจำนวนที่ฝ่ายเรากับคู่แข่งเก็บตกได้
+  const ourSecond = count('Our') > 0
+    ? events.filter((e) => e.startsWith('Our') && (e.includes('wins the second ball') || e.includes('reacts first to the loose ball'))).length
+    : 0;
+  const theirSecond = events.filter(
+    (e) => e.startsWith('Their') && (e.includes('wins the second ball') || e.includes('reacts first to the loose ball'))
+  ).length;
+  const contests = count('Second ball contest');
+  flags.secondBallLost = contests >= 1 && theirSecond > ourSecond;
+  flags.secondBallWon = contests >= 1 && ourSecond > theirSecond;
+
+  // ลูกยิงโดนบล็อกแต่ยังอันตราย (rebound ตกหน้ากรอบคู่แข่ง)
+  flags.blockedShotStillDangerous =
+    has('Shot blocked by their') && has('reacts first to the loose ball') && has('Our');
 }
 
 // ---------- P2.6: finishing detections ----------

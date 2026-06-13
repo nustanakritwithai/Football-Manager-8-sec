@@ -227,6 +227,87 @@ export function generateAdvice(state, analysis, events, prevScores) {
     });
   }
 
+  // --- P2.7: ball physics / second ball / rebound / first touch ---
+  if (flags.reboundChanceCreated) {
+    candidates.push({
+      priority: flags.reboundChanceMissed ? 69 : 46,
+      severity: flags.reboundChanceMissed ? 'warn' : 'good',
+      text: flags.reboundChanceMissed
+        ? 'ลูกยิงของคุณโดนบล็อก/ปัดแล้วบอลกระเด็นกลับเข้าเขตโทษ แต่คู่แข่งเก็บ second ball ไปก่อน — ดัน ST/AM ยืนรอเก็บตกหน้าเขตโทษ อย่าให้ค้างหลังบอล'
+        : 'ลูกยิงของคุณถูกปัด/บล็อกแล้วบอลกระเด็นกลับเข้าเขตโทษ — รักษาตัวเติมซ้ำดาบสองให้พร้อมวิ่งเข้าทุกครั้งที่ยิง',
+    });
+  }
+  if (flags.dangerousRebound) {
+    candidates.push({
+      priority: 81, severity: 'danger',
+      text: 'GK คุณปัด/บอลเด้งในกรอบเขตโทษเรา เสี่ยงโดนซ้ำดาบสอง — สั่ง CB/DM เก็บ second ball หน้าปากประตู อย่ามองแต่ผู้ยิงคนแรก',
+    });
+  }
+  if (flags.secondBallLost) {
+    candidates.push({
+      priority: 65, severity: 'warn',
+      text: 'ทีมคุณแพ้ second ball บ่อย เพราะ CM/DM อยู่ไกลจุดตกบอลเกินไป — ให้กองกลางยืนใกล้รัศมีบอลกระเด็นและพร้อมพุ่งเข้าก่อน',
+    });
+  } else if (flags.secondBallWon) {
+    candidates.push({
+      priority: 40, severity: 'good',
+      text: 'ทีมคุณชนะ second ball หน้าเขตโทษ — การยืนตำแหน่งรอบจุดตกบอลกำลังได้ผล รักษาโครงสร้างนี้ไว้',
+    });
+  }
+  if (flags.dangerousDeflection) {
+    candidates.push({
+      priority: 70, severity: 'warn',
+      text: 'กองหลังเคลียร์/บอลแฉลบไม่ขาดในแดนหลัง บอลกระเด็นเข้ากลางสนามให้คู่แข่งสวน — เคลียร์ให้ไกลและกว้างขึ้น หรือเก็บ DM ไว้คอยตัด second ball',
+    });
+  }
+  if (flags.poorFirstTouch && state.possessionTeam !== 'home') {
+    candidates.push({
+      priority: 54, severity: 'info',
+      text: 'ผู้รับบอลของคุณจับบอลแรกไม่ดีตอนโดนบีบ/บอลแรง ทำให้บอลหลุด — ลองจ่ายบอลเรียบเข้าเท้าในจังหวะที่ผู้รับมีพื้นที่มากขึ้น',
+    });
+  }
+
+  // --- P2.8: set piece / foul / restart ---
+  if (flags.pendingRestart && flags.pendingRestart.team === 'home') {
+    const tips = {
+      corner: 'ได้เตะมุม — ดัน CB ตัวสูงกับ ST เข้า box เปิดเสาไกล/เสาใกล้ และเก็บ DM ไว้คุม second ball หน้ากรอบ',
+      freeKick: 'ได้ฟรีคิก — ถ้าใกล้กรอบลองยิงตรงหรือเปิดเข้า box, ถ้าไกลจ่ายสั้นตั้งเกมแล้วค่อยเจาะ',
+      goalKick: 'ลูกตั้งเตะจากประตู — ถ้าคู่แข่งกดสูงให้เปิดยาวหา ST/ปีก, ถ้าไม่กดเล่นสั้นออกจากกรอบ',
+      throwIn: 'ทุ่มเข้าเล่น — หาตัวรับใกล้ริมเส้นแล้วต่อบอลเร็ว อย่าทุ่มเข้ากลางที่คู่แข่งคุมอยู่',
+      penalty: 'ได้จุดโทษ! เลือกมุมยิงให้เด็ดขาด',
+    };
+    candidates.push({ priority: 86, severity: 'good', text: tips[flags.pendingRestart.type] || 'เริ่มเล่นลูกตั้งเตะ' });
+  }
+  if (flags.concededPenalty) {
+    candidates.push({ priority: 95, severity: 'danger', text: 'เสียจุดโทษจากการฟาวล์ในกรอบ — ระวังการเข้าปะทะในเขตโทษ อย่าเสียบสุ่มเสี่ยงเมื่อยังคุมตำแหน่งได้' });
+  }
+  if (flags.concededCornerShot) {
+    candidates.push({ priority: 79, severity: 'danger', text: 'เสียเตะมุมแล้วโดนยิงต่อ — ตั้งรับ corner ไม่มีคนคุมเสาไกล/หน้ากรอบ จัดคนมาร์กตัวสูงและคุม zone หน้าประตูให้ครบ' });
+  } else if (flags.concededCorner) {
+    candidates.push({ priority: 58, severity: 'warn', text: 'เสียเตะมุมบ่อย — เช็ก rest defence ตอนเปิดเกมรุก อย่าให้ fullback โดนเจาะจนต้องสกัดออกหลัง' });
+  }
+  if (flags.cornerCreatedShot) {
+    candidates.push({ priority: 44, severity: 'good', text: 'เตะมุมของเราสร้างโอกาสยิงได้ — แพตเทิร์นเติมคนเข้า box กำลังได้ผล รักษาไว้' });
+  }
+  if (flags.foulProne) {
+    candidates.push({ priority: 64, severity: 'warn', text: 'ทีมเราเสียฟาวล์เยอะ เสี่ยงใบเหลือง/ฟรีคิกอันตราย — ลดการเข้าปะทะแบบสุ่มเสี่ยง เน้นยืนตำแหน่งปิดพื้นที่แทนการเสียบ' });
+  } else if (flags.gotFreeKick || flags.gotPenalty) {
+    candidates.push({ priority: 41, severity: 'info', text: 'ได้ลูกตั้งเตะในแดนคู่แข่ง — ใช้จังหวะ set piece ให้เป็นโอกาสจบสกอร์ ดันตัวเป้าเข้ากรอบก่อนเล่น' });
+  }
+
+  // --- P2.9: finishing quality ---
+  if (flags.bigChanceMissed) {
+    candidates.push({ priority: 67, severity: 'warn', text: 'พลาด big chance — จังหวะแบบนี้ต้องจบให้ได้ เล็งมุมประตูแทนการยิงกลาง และยิงจังหวะเดียวเมื่อบอลมาเร็ว' });
+  }
+  if (flags.shotsTooCentral || flags.opponentKeeperHot) {
+    candidates.push({ priority: 62, severity: 'warn', text: 'ยิงเข้ากรอบหลายครั้งแต่ถูก GK รับง่าย เพราะยิงกลางประตู/placement ต่ำ — เล็ง low corner หรือเสาไกลให้ GK ต้องพุ่งจริง' });
+  } else if (flags.underperformingXg) {
+    candidates.push({ priority: 60, severity: 'info', text: 'xG สะสมสูงแต่ยังไม่เป็นประตู — โอกาสดีพอแล้ว ปัญหาอยู่ที่ finishing/placement ลองเลือกมุมยิงให้คมขึ้น' });
+  }
+  if (flags.wastefulShooting) {
+    candidates.push({ priority: 56, severity: 'info', text: 'ยิงหลุดกรอบบ่อย — ถ้ามุมแคบหรือโดนบีบ ลอง cutback หาตัวกลางกรอบแทนการฝืนยิง' });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;
