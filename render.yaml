@@ -3,7 +3,7 @@ services:
     name: tactic-manager-lab
     runtime: static
     repo: https://github.com/nustanakritwithai/Football-Manager-8-sec
-    branch: claude/tactic-manager-lab-design-cvyqs9
+    branch: claude/ball-physics-lite-p27-k4c083
     buildCommand: echo "Static site — no build step"
     staticPublishPath: .
     headers:

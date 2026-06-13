@@ -5,7 +5,7 @@ API_KEY="${RENDER_API_KEY:?Set RENDER_API_KEY (Render Dashboard → Account Sett
 OWNER_ID="${RENDER_OWNER_ID:?Set RENDER_OWNER_ID (Render Dashboard → Workspace Settings → Workspace ID)}"
 SERVICE_ID="${RENDER_SERVICE_ID:-}"
 REPO="${RENDER_REPO:-https://github.com/nustanakritwithai/Football-Manager-8-sec}"
-BRANCH="${RENDER_BRANCH:-claude/tactic-manager-lab-design-cvyqs9}"
+BRANCH="${RENDER_BRANCH:-claude/ball-physics-lite-p27-k4c083}"
 SERVICE_NAME="${RENDER_SERVICE_NAME:-tactic-manager-lab}"
 
 api() {

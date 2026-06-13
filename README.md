@@ -26,9 +26,16 @@ npx serve .
 
 ### Render (แนะนำ)
 
-มี `render.yaml` ใน repo แล้ว — เชื่อม GitHub repo กับ Render ได้ 2 วิธี:
+`render.yaml` ชี้ branch **`claude/ball-physics-lite-p27-k4c083`** (P2.7 Ball Physics + P2.8 Match Rules)
 
-**วิธีที่ 1: Blueprint (ง่ายสุด)**  
+**ไม่ต้อง merge** เข้า `claude/tactic-manager-lab-design-cvyqs9` — ใช้วิธีเดียวกับตอน deploy P2.7:
+Render Dashboard → Service → **Settings → Branch** → `claude/ball-physics-lite-p27-k4c083` → **Manual Deploy**
+
+ถ้าตั้ง branch ไว้แล้วตั้งแต่ P2.7 แค่ push P2.8 ขึ้น branch เดิม Render จะ auto-deploy ให้
+
+**ทางเลือก:** merge `claude/ball-physics-lite-p27-k4c083` → `claude/tactic-manager-lab-design-cvyqs9` แล้วชี้ Render กลับไปที่ base branch
+
+**วิธีที่ 1: Blueprint**  
 Render Dashboard → **New +** → **Blueprint** → เลือก repo `Football-Manager-8-sec` → Deploy
 
 **วิธีที่ 2: API / Script**  
