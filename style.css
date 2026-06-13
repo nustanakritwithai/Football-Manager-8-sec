@@ -257,3 +257,30 @@ select, input[type="range"] {
   #app { flex-direction: column; }
   #panel { width: 100%; flex: none; max-height: none; }
 }
+
+/* ---------- P-juice: เสียง + เอฟเฟกต์บรรยากาศ ---------- */
+#left { position: relative; }
+.btn-sound {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 2px 4px; margin-left: auto;
+}
+.btn-sound:hover { transform: scale(1.15); }
+
+.goal-banner {
+  position: absolute; top: 40%; left: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  font-weight: 800; font-size: 44px; letter-spacing: 1px;
+  color: #fff; text-shadow: 0 2px 18px rgba(0,0,0,0.75), 0 0 30px rgba(62,207,110,0.55);
+  opacity: 0; pointer-events: none; z-index: 20; white-space: nowrap;
+}
+.goal-banner.show { animation: goalpop 2.6s cubic-bezier(.2,.9,.2,1) forwards; }
+.goal-banner.banner-goal { color: #3ecf6e; }
+.goal-banner.banner-goal-away { color: #e0473d; text-shadow: 0 2px 18px rgba(0,0,0,0.75), 0 0 30px rgba(224,71,61,0.55); }
+.goal-banner.banner-info { color: #ffd166; font-size: 34px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); }
+@keyframes goalpop {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.4); }
+  12%  { opacity: 1; transform: translate(-50%,-50%) scale(1.18); }
+  22%  { transform: translate(-50%,-50%) scale(1); }
+  80%  { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.05); }
+}
