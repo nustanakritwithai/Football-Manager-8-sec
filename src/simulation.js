@@ -307,6 +307,8 @@ export function evaluateTeamObjective(state, teamId) {
   const t = state.teams[teamId];
   const b = state.ball;
 
+  // บอลหลุดเป็น loose ball = 50/50 ทั้งสองทีมต้องวิ่งแย่ง (ไม่ใช่ยืน midBlock เฉย ๆ)
+  if (b.isLoose) return 'recoverBall';
   if (phase === 'DEFENDING') return t.pressingLevel >= 4 ? 'highPress' : 'midBlock';
   if (phase === 'TRANSITION_TO_DEFENSE') return 'recoverShape';
   if (phase === 'TRANSITION_TO_ATTACK') return 'counterAttack';
@@ -1015,8 +1017,13 @@ function resolvePassArrival(state) {
     }
   } else {
     labelPendingPass(state, 0);
-    b.isLoose = true;
-    b.ballMode = 'loose';
+    // บอลพลาดเป้า → loose ball ที่ยังไหลต่อ (ให้ทั้งสองทีมวิ่งแย่ง ไม่ใช่บอลตายนิ่ง)
+    const pp = state.sim.pendingPass;
+    const sx = pp?.startX ?? b.x, sy = pp?.startY ?? b.y;
+    const dx = b.x - sx, dy = b.y - sy;
+    const mag = Math.hypot(dx, dy) || 1;
+    makeLoose(state, (dx / mag) * rand(3, 6), (dy / mag) * rand(3, 6), rand(0, 1.5), 'loose');
+    markSecondBall(state, 'loose', b.lastTouchTeam);
     recordEvent(state, 'Pass failed — ball loose');
   }
   state.sim.pendingPass = null;
