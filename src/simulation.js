@@ -955,7 +955,18 @@ function resolveLooseRecovery(state) {
   if ((b.z || 0) > BALL_REACH_HEIGHT) return;
 
   const reach = PLAYER_TOUCH_RADIUS + b.radius;
-  const contenders = state.players.filter((p) => distP(p, b) < reach);
+  let contenders = state.players.filter((p) => distP(p, b) < reach);
+  // safety net: บอลเกือบหยุดนิ่งแต่ไม่มีใครเอื้อมถึงพอดี (เช่นคร่อมกันอยู่)
+  // → ให้คนใกล้สุดที่อยู่ในระยะ ~2.6m เก็บได้ กันบอลติดค้างตรงกลาง
+  if (!contenders.length && Math.hypot(b.velocityX, b.velocityY) < 0.6) {
+    let nearest = null, bd = 2.6;
+    for (const p of state.players) {
+      if (p.role === 'GK' && distP(p, b) > 1.71) continue;
+      const d = distP(p, b);
+      if (d < bd) { bd = d; nearest = p; }
+    }
+    if (nearest) contenders = [nearest];
+  }
   if (!contenders.length) return;
 
   // เลือกผู้ชนะตามคะแนน second-ball (ใกล้สุดไม่ใช่ผู้ชนะเสมอ)
@@ -2052,10 +2063,13 @@ function movePlayer(state, p, owner) {
     dy += dy > 34 ? -6 : 6;
   }
 
-  // separation: ผลักออกจากเพื่อนที่ใกล้เกิน
-  const sep = separationVector(state, p, owner);
-  dx += sep.x;
-  dy += sep.y;
+  // separation: ผลักออกจากเพื่อนที่ใกล้เกิน — ยกเว้นคนนำที่กำลังพุ่งเก็บ loose ball
+  // (ไม่งั้น separation จะดันให้ห่างบอลจนเก็บไม่ได้ บอลติดค้างตรงกลาง)
+  if (!desired.chaseLead) {
+    const sep = separationVector(state, p, owner);
+    dx += sep.x;
+    dy += sep.y;
+  }
 
   dx = clamp(dx, 0.3, PITCH.length - 0.3);
   dy = clamp(dy, 0.3, PITCH.width - 0.3);
@@ -2171,7 +2185,15 @@ function offBallDesired(state, p, owner) {
     const mates = teamPlayers(state, p.team)
       .filter((m) => m.role !== 'GK')
       .sort((a, c) => distP(a, b) - distP(c, b));
-    if (mates.indexOf(p) < 2) return { x: b.x, y: b.y, urgency: 1, pressing: true };
+    const idx = mates.indexOf(p);
+    // คนใกล้สุดพุ่งเข้าบอลตรง ๆ และ "ไม่ติด separation" จะได้เก็บบอลได้จริง
+    // (กัน bug บอลติดตรงกลางเพราะเพื่อนสองคนถูกดันให้ห่างกันคร่อมบอล)
+    if (idx === 0) return { x: b.x, y: b.y, urgency: 1, pressing: true, chaseLead: true };
+    // คนที่สองวิ่งประกบเฉียงเล็กน้อย (support) ไม่ชนคนแรก
+    if (idx === 1) {
+      const off = p.y < b.y ? -2.5 : 2.5;
+      return { x: b.x, y: clamp(b.y + off, 0.5, PITCH.width - 0.5), urgency: 1, pressing: true };
+    }
   }
 
   // บอลกำลังลอยมาหาทีมเรา: ผู้รับที่ใกล้จุดตกที่สุดวิ่งเข้าไปรับ
