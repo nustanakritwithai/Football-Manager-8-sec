@@ -334,13 +334,11 @@ function updatePhases(state) {
   state.teamPhases.away = evaluateTeamPhase(state, 'away');
 }
 
-function updateObjectives(state, logEvent = false) {
-  const prev = state.teamObjectives.home;
+function updateObjectives(state, _logEvent = false) {
   state.teamObjectives.home = evaluateTeamObjective(state, 'home');
   state.teamObjectives.away = evaluateTeamObjective(state, 'away');
-  if (logEvent || state.teamObjectives.home !== prev) {
-    recordEvent(state, `Objective: ${state.teamObjectives.home} (${state.teamPhases.home})`);
-  }
+  // หมายเหตุ: ไม่ log "Objective: ..." ลง event log อีกต่อไป — เป็นข้อมูล coaching
+  // ที่แสดงบนแดชบอร์ด (teamPhase) อยู่แล้ว การ log ทุกเทิร์นทำให้ event log รก/ดูเหมือนวนซ้ำ
 }
 
 // ---------- AI คู่แข่งวางแผนก่อนเทิร์น ----------
