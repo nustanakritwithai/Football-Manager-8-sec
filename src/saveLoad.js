@@ -6,6 +6,20 @@ import { isNum } from './utils.js';
 import { defaultCommand } from './player.js';
 import { ensureBallPhysics } from './ball.js';
 
+function serializePlayer(p) {
+  return {
+    id: p.id, name: p.name, team: p.team, role: p.role, number: p.number,
+    x: p.x, y: p.y, targetX: p.targetX, targetY: p.targetY,
+    baseX: p.baseX, baseY: p.baseY,
+    speed: p.speed, stamina: p.stamina, passing: p.passing,
+    pressing: p.pressing, tackling: p.tackling, vision: p.vision,
+    positioning: p.positioning, shooting: p.shooting,
+    discipline: p.discipline, aggression: p.aggression, decision: p.decision,
+    intendedTarget: p.intendedTarget ?? null,
+    commandType: p.commandType ?? null,
+  };
+}
+
 export function serialize(state) {
   return {
     version: SAVE_VERSION,
@@ -20,17 +34,13 @@ export function serialize(state) {
       home: { ...state.teams.home },
       away: { ...state.teams.away },
     },
-    players: state.players.map((p) => ({
-      id: p.id, name: p.name, team: p.team, role: p.role, number: p.number,
-      x: p.x, y: p.y, targetX: p.targetX, targetY: p.targetY,
-      baseX: p.baseX, baseY: p.baseY,
-      speed: p.speed, stamina: p.stamina, passing: p.passing,
-      pressing: p.pressing, tackling: p.tackling, vision: p.vision,
-      positioning: p.positioning, shooting: p.shooting,
-      discipline: p.discipline, aggression: p.aggression, decision: p.decision,
-      intendedTarget: p.intendedTarget ?? null,
-      commandType: p.commandType ?? null,
-    })),
+    players: state.players.map(serializePlayer),
+    // ตัวสำรอง + สิทธิ์เปลี่ยนตัว
+    benches: state.benches
+      ? { home: state.benches.home.map(serializePlayer), away: state.benches.away.map(serializePlayer) }
+      : null,
+    subsUsed: state.subsUsed ? { ...state.subsUsed } : { home: 0, away: 0 },
+    subsMax: state.subsMax ?? 5,
     ball: { ...state.ball },
     // P2.8: match rules & restart
     playState: state.playState ?? 'live',
@@ -81,10 +91,14 @@ export function applySave(state, data) {
   Object.assign(state.teams.home, data.teams.home);
   Object.assign(state.teams.away, data.teams.away);
 
-  // จับคู่นักเตะตาม id — save เก่า (v1) ไม่มี field P2 ให้ใส่ default
-  for (const saved of data.players) {
-    const p = state.players.find((q) => q.id === saved.id);
-    if (!p) continue;
+  // pool = ทุก id ที่มี (11+11 ในสนาม + 7+7 สำรอง) — id คงที่เสมอแม้เคยเปลี่ยนตัว
+  const pool = new Map();
+  for (const p of [...state.players, ...(state.benches?.home ?? []), ...(state.benches?.away ?? [])]) {
+    pool.set(p.id, p);
+  }
+  const restore = (saved) => {
+    const p = pool.get(saved.id) || state.players.find((q) => q.id === saved.id);
+    if (!p) return null;
     Object.assign(p, saved);
     p.pathHistory = [];
     p.isSelected = false;
@@ -95,7 +109,29 @@ export function applySave(state, data) {
     p.runType = null;
     p.runTarget = null;
     p.currentAction = null;
+    return p;
+  };
+
+  // จัดผู้เล่นในสนาม 22 คนตาม save (รองรับ id ตัวสำรองที่เคยถูกเปลี่ยนลง)
+  const onPitch = data.players.map(restore).filter(Boolean);
+  if (onPitch.length === 22) state.players = onPitch;
+  else for (const saved of data.players) restore(saved); // fallback: assign ในที่เดิม
+
+  // ตัวสำรอง: ใช้จาก save ถ้ามี ไม่งั้นเก็บ id ที่เหลือจาก pool เป็น bench
+  if (data.benches?.home && data.benches?.away) {
+    state.benches = {
+      home: data.benches.home.map(restore).filter(Boolean),
+      away: data.benches.away.map(restore).filter(Boolean),
+    };
+  } else {
+    const onIds = new Set(state.players.map((p) => p.id));
+    state.benches = { home: [], away: [] };
+    for (const p of pool.values()) {
+      if (!onIds.has(p.id)) state.benches[p.team]?.push(p);
+    }
   }
+  state.subsUsed = data.subsUsed ?? { home: 0, away: 0 };
+  state.subsMax = data.subsMax ?? 5;
   state.passMemory = { lastPasserId: null, lastReceiverId: null, recentPasses: [] };
   state.teamPhases = { home: 'BUILD_UP', away: 'DEFENDING' };
   state.teamObjectives = { home: 'buildUp', away: 'midBlock' };

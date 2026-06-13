@@ -37,6 +37,7 @@
 
     <aside id="panel">
       <section class="card">
+        <button id="btnTactics" class="btn-tactics">⚙ ปรับแผน / Tactics</button>
         <button id="btnPlay" class="btn-play">▶ Play Next 8 Seconds</button>
         <div class="row">
           <label>ความเร็ว
@@ -137,6 +138,33 @@
   </div>
 
   <div id="tooltip"></div>
+
+  <!-- P3.0: Tactics modal (Football Manager-style) -->
+  <div id="tacticsModal" class="tactics-modal">
+    <div class="tactics-box">
+      <header class="tactics-head">
+        <h2>⚙ ปรับแผน — Tactics</h2>
+        <label class="tactics-formation">Formation
+          <select id="tacticsFormation"></select>
+        </label>
+        <span id="tacticsSubs" class="tactics-subs">เปลี่ยนตัว 0/5</span>
+        <button id="tacticsClose" class="btn-sm">✕ ปิด</button>
+      </header>
+      <div class="tactics-body">
+        <div class="tactics-pitch">
+          <canvas id="tacticsCanvas"></canvas>
+          <div id="tacticsHint" class="tactics-hint"></div>
+          <button id="tacticsReset" class="btn-sm">↺ รีเซ็ตตามฟอร์เมชัน</button>
+        </div>
+        <div class="tactics-squad">
+          <h3>ตัวจริง (Starting XI)</h3>
+          <div id="starterList" class="squad-list"></div>
+          <h3>ตัวสำรอง (Bench)</h3>
+          <div id="benchList" class="squad-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="src/main.js"></script>
 </body>
