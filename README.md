@@ -181,14 +181,22 @@ save/load, export/import JSON, แมตช์ 38 เทิร์นพร้อ
   ที่ marker ห่างสุด (บอลลอยข้ามหัว ตัดกลางทางไม่ได้ ไปวัดกันที่ลูกกลางอากาศ
   ตอนบอลตก — ใครชนะ duel ได้บอล แล้วยิงจังหวะเดียวได้) ส่วน early ball
   คือโยนจากลึกข้ามแนวรับให้ runner ก่อนเกมรับตั้งหลัก เด่นช่วง counter
+- **⚽ Ball Physics Lite (P2.7)** — บอลเป็น "วัตถุกลม": มี velocity แนวราบ/แนวตั้ง (z),
+  spin, friction, gravity และความเด้ง → กลิ้งแล้วค่อยหยุด, เปิดยาว/เคลียร์แล้วเด้ง,
+  พุ่งจ่อกองหลังแล้ว **แฉลบ** เป็น loose ball, รับบอลแรง/โดนบีบ/บอลเด้งแล้ว
+  **first touch หลุด**, ลูกยิง **โดนบล็อก / GK ปัด / ชนเสา** กลายเป็น rebound,
+  แล้วเกิด **second ball contest** — ใครยืนตำแหน่งดี/หันเข้าหาบอล/สดกว่า เก็บตกได้ก่อน
+  (randomness ถูกคุมด้วยบริบท: ความเร็วบอล, pressure, positioning, stamina ไม่ใช่ pinball)
+  AI Assistant เตือนเรื่อง rebound, second ball, first touch, deflection ในแดนหลัง
 
 ## การทดสอบ
 
 ```bash
-node tests/p2-tactical.mjs    # movement radius, no-teleport, anti-clustering
-node tests/p3-tools.mjs       # preview, adjust, corner, retrieval, dataset
-node tests/p5-research.mjs    # penalty, learning, what-if, fog of war
-node tests/p26-finishing.mjs  # must-shoot, cutback, no wild shots, shot volume
+node tests/p2-tactical.mjs     # movement radius, no-teleport, anti-clustering
+node tests/p3-tools.mjs        # preview, adjust, corner, retrieval, dataset
+node tests/p5-research.mjs     # penalty, learning, what-if, fog of war
+node tests/p26-finishing.mjs   # must-shoot, cutback, no wild shots, shot volume, cross
+node tests/p27-ball-physics.mjs # rolling, bounce, deflection, first touch, rebound, second ball
 ```
 
 ยังไม่ทำ (ตามแผน): ลีก, ตลาดซื้อขาย, นักเตะจริง, ฤดูกาล, 3D, multiplayer, LLM runtime

@@ -318,7 +318,64 @@ export function drawOverlays(ctx, state) {
   drawIntents(ctx, state);
   drawRunArrows(ctx, state);
   drawCarrierAction(ctx, state);
+  // P2.7: ball physics visuals
+  drawBallTrail(ctx, state);
+  drawSecondBallZone(ctx, state);
+  drawLooseBallPulse(ctx, state);
+  drawBallFxLabel(ctx, state);
   drawGhosts(ctx, state);
+}
+
+// P2.7: เส้น trail ของบอลตอนยิง/จ่าย/เด้ง
+function drawBallTrail(ctx, state) {
+  if (state.phase !== 'simulating') return;
+  const tr = state.ball.trail;
+  if (!Array.isArray(tr) || tr.length < 2) return;
+  for (let i = 1; i < tr.length; i++) {
+    const a = tr[i - 1], b = tr[i];
+    ctx.beginPath();
+    ctx.moveTo(toPx(a.x), toPy(a.y) - (a.z || 0) * 2);
+    ctx.lineTo(toPx(b.x), toPy(b.y) - (b.z || 0) * 2);
+    ctx.strokeStyle = `rgba(247,244,233,${0.08 + (i / tr.length) * 0.32})`;
+    ctx.lineWidth = 1 + (i / tr.length) * 1.5;
+    ctx.stroke();
+  }
+}
+
+// P2.7: ไฮไลต์โซน second ball เมื่อมี loose ball ที่ต้องแย่งกัน
+function drawSecondBallZone(ctx, state) {
+  if (state.phase !== 'simulating' || !state.sim?.secondBall || !state.ball.isLoose) return;
+  const b = state.ball;
+  ctx.beginPath();
+  ctx.arc(toPx(b.x), toPy(b.y), 6.5 * SCALE, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(242,201,76,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 6]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// P2.7: บอล loose กระพริบ/วงขยายให้สังเกตง่าย
+function drawLooseBallPulse(ctx, state) {
+  if (state.phase !== 'simulating' || !state.ball.isLoose) return;
+  const b = state.ball;
+  const t = (performance.now() % 800) / 800;
+  const r = (5 + t * 9);
+  ctx.beginPath();
+  ctx.arc(toPx(b.x), toPy(b.y) - (b.z || 0) * 2, r, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,230,120,${0.5 * (1 - t)})`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+// P2.7: ป้าย Deflect / Rebound / Parry / Loose ตรงจุดที่เกิด
+function drawBallFxLabel(ctx, state) {
+  const fx = state.sim?.ballFx;
+  if (state.phase !== 'simulating' || !fx) return;
+  ctx.fillStyle = 'rgba(255,220,120,0.95)';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(fx.label, toPx(fx.x), toPy(fx.y) - 18);
 }
 
 // P5: Fog of War — เห็นคู่แข่งเฉพาะที่อยู่ใกล้นักเตะเรา/บอล (แนว Graph Imputer)

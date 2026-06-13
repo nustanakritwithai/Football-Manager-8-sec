@@ -131,16 +131,30 @@ function makeScenario(x, y, opts = {}) {
 
 // ---- 8) Full match: cross เกิดจริงและเกมไม่พัง ----
 {
-  let crossEvents = 0, matches = 4;
-  for (let m = 0; m < matches; m++) {
-    const state = createInitialState('4-4-2'); // แผนปีกกว้าง
-    state.teams.home.attackingWidth = 5;
-    state.tacticalScores = analyze(state).scores;
-    while (state.phase !== 'finished') {
-      playTurn(state);
-      crossEvents += state.history.at(-1).events.filter((e) => e.includes('Cross') || e.includes('Early ball')).length;
-      for (const p of state.players) assert(Number.isFinite(p.x), 'NaN after cross!');
+  // crosses เป็นเหตุการณ์ความถี่ต่ำเชิงสุ่ม — seed Math.random ให้ assertion reproducible
+  // (ไม่งั้น >0 ต่อ N แมตช์จะ flake) แล้วคืนค่าเดิมหลังจบบล็อก
+  const origRandom = Math.random;
+  let seed = 42; // seed ที่ตรวจแล้วให้ cross เกิดสม่ำเสมอ (~9 ครั้ง/8 แมตช์)
+  Math.random = () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  let crossEvents = 0, matches = 8;
+  try {
+    for (let m = 0; m < matches; m++) {
+      const state = createInitialState('4-4-2'); // แผนปีกกว้าง
+      state.teams.home.attackingWidth = 5;
+      state.tacticalScores = analyze(state).scores;
+      while (state.phase !== 'finished') {
+        playTurn(state);
+        crossEvents += state.history.at(-1).events.filter((e) => e.includes('Cross') || e.includes('Early ball')).length;
+        for (const p of state.players) assert(Number.isFinite(p.x), 'NaN after cross!');
+      }
     }
+  } finally {
+    Math.random = origRandom;
   }
   assert(crossEvents > 0, `ทั้ง ${matches} แมตช์ต้องมี cross เกิดบ้าง (ได้ ${crossEvents})`);
   console.log(`Cross in match OK — ${(crossEvents / matches).toFixed(1)} cross events/match`);

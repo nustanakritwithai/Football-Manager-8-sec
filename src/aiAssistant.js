@@ -227,6 +227,46 @@ export function generateAdvice(state, analysis, events, prevScores) {
     });
   }
 
+  // --- P2.7: ball physics / second ball / rebound / first touch ---
+  if (flags.reboundChanceCreated) {
+    candidates.push({
+      priority: flags.reboundChanceMissed ? 69 : 46,
+      severity: flags.reboundChanceMissed ? 'warn' : 'good',
+      text: flags.reboundChanceMissed
+        ? 'ลูกยิงของคุณโดนบล็อก/ปัดแล้วบอลกระเด็นกลับเข้าเขตโทษ แต่คู่แข่งเก็บ second ball ไปก่อน — ดัน ST/AM ยืนรอเก็บตกหน้าเขตโทษ อย่าให้ค้างหลังบอล'
+        : 'ลูกยิงของคุณถูกปัด/บล็อกแล้วบอลกระเด็นกลับเข้าเขตโทษ — รักษาตัวเติมซ้ำดาบสองให้พร้อมวิ่งเข้าทุกครั้งที่ยิง',
+    });
+  }
+  if (flags.dangerousRebound) {
+    candidates.push({
+      priority: 81, severity: 'danger',
+      text: 'GK คุณปัด/บอลเด้งในกรอบเขตโทษเรา เสี่ยงโดนซ้ำดาบสอง — สั่ง CB/DM เก็บ second ball หน้าปากประตู อย่ามองแต่ผู้ยิงคนแรก',
+    });
+  }
+  if (flags.secondBallLost) {
+    candidates.push({
+      priority: 65, severity: 'warn',
+      text: 'ทีมคุณแพ้ second ball บ่อย เพราะ CM/DM อยู่ไกลจุดตกบอลเกินไป — ให้กองกลางยืนใกล้รัศมีบอลกระเด็นและพร้อมพุ่งเข้าก่อน',
+    });
+  } else if (flags.secondBallWon) {
+    candidates.push({
+      priority: 40, severity: 'good',
+      text: 'ทีมคุณชนะ second ball หน้าเขตโทษ — การยืนตำแหน่งรอบจุดตกบอลกำลังได้ผล รักษาโครงสร้างนี้ไว้',
+    });
+  }
+  if (flags.dangerousDeflection) {
+    candidates.push({
+      priority: 70, severity: 'warn',
+      text: 'กองหลังเคลียร์/บอลแฉลบไม่ขาดในแดนหลัง บอลกระเด็นเข้ากลางสนามให้คู่แข่งสวน — เคลียร์ให้ไกลและกว้างขึ้น หรือเก็บ DM ไว้คอยตัด second ball',
+    });
+  }
+  if (flags.poorFirstTouch && state.possessionTeam !== 'home') {
+    candidates.push({
+      priority: 54, severity: 'info',
+      text: 'ผู้รับบอลของคุณจับบอลแรกไม่ดีตอนโดนบีบ/บอลแรง ทำให้บอลหลุด — ลองจ่ายบอลเรียบเข้าเท้าในจังหวะที่ผู้รับมีพื้นที่มากขึ้น',
+    });
+  }
+
   // --- P3: เคยเจอสถานการณ์คล้ายกันมาก่อน (similar situation retrieval) ---
   if (flags.similarTurn?.danger) {
     const s = flags.similarTurn;

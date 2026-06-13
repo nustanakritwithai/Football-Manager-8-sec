@@ -4,6 +4,7 @@ import { SAVE_VERSION, STORAGE_KEY, PITCH } from './config.js';
 import { isValidFormation } from './formations.js';
 import { isNum } from './utils.js';
 import { defaultCommand } from './player.js';
+import { ensureBallPhysics } from './ball.js';
 
 export function serialize(state) {
   return {
@@ -98,6 +99,8 @@ export function applySave(state, data) {
   state.ui.whatIf = false;
 
   Object.assign(state.ball, data.ball);
+  // P2.7: save เก่าที่ยังไม่มี z/velocityZ/spin/ballMode → เติม default กัน crash
+  ensureBallPhysics(state.ball);
   state.tacticalScores = data.tacticalScores || null;
   state.history = Array.isArray(data.history) ? data.history.slice(-10) : [];
   state.lastTurnEvents = [];

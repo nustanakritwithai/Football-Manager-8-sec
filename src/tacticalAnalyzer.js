@@ -38,7 +38,58 @@ export function analyze(state) {
   // P2.6: ตรวจปัญหาการจบสกอร์ใน final third
   detectFinishingIssues(state, flags);
 
+  // P2.7: ตรวจจังหวะบอลกระเด็น / second ball / first touch
+  detectBallPhysicsIssues(state, flags);
+
   return { scores, flags };
+}
+
+// ---------- P2.7: ball physics detections (มุมมองทีมเรา) ----------
+
+function detectBallPhysicsIssues(state, flags) {
+  const events = state.lastTurnEvents || [];
+  const has = (sub) => events.some((e) => e.includes(sub));
+  const count = (sub) => events.filter((e) => e.includes(sub)).length;
+
+  // first touch ของเราหลุด (กระฉอก/จับลั่น)
+  flags.poorFirstTouch = events.some(
+    (e) => (e.startsWith('Heavy first touch by our') || e.startsWith('Poor first touch by our'))
+  );
+
+  // เราสร้างโอกาสซ้ำดาบสอง: ลูกยิงเราโดนบล็อก/ปัด/ชนเสา → rebound ในกรอบ
+  flags.reboundChanceCreated =
+    has('Our shot parried into the box')
+    || (has('Shot blocked by their') && has('Shot chance! Our'))
+    || (has('hits the post') && has('Shot chance! Our'));
+
+  // ได้ rebound แต่เก็บ second ball ไม่ได้ (คู่แข่งเก็บตกก่อน)
+  flags.reboundChanceMissed = flags.reboundChanceCreated
+    && (has('Their') && (has('reacts first to the loose ball') || has('wins the second ball')));
+
+  // อันตรายหน้ากรอบเรา: ลูกยิงคู่แข่งถูกปัด/บล็อกในเขตเรา → บอลเด้งในกรอบ
+  flags.dangerousRebound =
+    has('Their shot parried into the box')
+    || (has('GK parried') && has('Shot chance! Their'));
+
+  // แฉลบอันตราย: บอลแฉลบ/ริคโคเชตของเราในแดนหลัง เปิดทางคู่แข่ง
+  flags.dangerousDeflection =
+    (has('Ball deflected by our') || has('Clearance ricocheted off our'))
+    && (has('Shot chance! Their') || has('Counter risk'));
+
+  // ชนะ/แพ้ second ball: เทียบจำนวนที่ฝ่ายเรากับคู่แข่งเก็บตกได้
+  const ourSecond = count('Our') > 0
+    ? events.filter((e) => e.startsWith('Our') && (e.includes('wins the second ball') || e.includes('reacts first to the loose ball'))).length
+    : 0;
+  const theirSecond = events.filter(
+    (e) => e.startsWith('Their') && (e.includes('wins the second ball') || e.includes('reacts first to the loose ball'))
+  ).length;
+  const contests = count('Second ball contest');
+  flags.secondBallLost = contests >= 1 && theirSecond > ourSecond;
+  flags.secondBallWon = contests >= 1 && ourSecond > theirSecond;
+
+  // ลูกยิงโดนบล็อกแต่ยังอันตราย (rebound ตกหน้ากรอบคู่แข่ง)
+  flags.blockedShotStillDangerous =
+    has('Shot blocked by their') && has('reacts first to the loose ball') && has('Our');
 }
 
 // ---------- P2.6: finishing detections ----------

@@ -72,3 +72,26 @@ export const DEBUG = {
   showPhase: true,       // แสดง team phase + objective บน scoreboard
   showCongestion: false, // highlight โซนแออัด
 };
+
+// ---------- P2.7: Ball Physics Lite ----------
+// บอลเป็น "วัตถุกลม" เบา ๆ: กลิ้ง เด้ง แฉลบ กระเด็น — ความไม่แน่นอนที่มีเหตุผล
+export const BALL_RADIUS = 0.11;             // เมตร
+export const BALL_GROUND_FRICTION = 0.93;    // ตัวคูณต่อ tick ตอนบอลกลิ้งบนพื้น
+export const BALL_AIR_DRAG = 0.985;          // ตัวคูณต่อ tick ตอนบอลลอย
+export const BALL_GRAVITY = 9.8;             // m/s^2
+export const BALL_BOUNCINESS = 0.45;         // ค่าเด้งเริ่มต้น (0.35–0.65)
+export const BALL_BOUNCE_FRICTION = 0.82;    // แรงเสียดทานแนวราบตอนเด้งกับพื้น
+export const BALL_ROLL_STOP_SPEED = 0.35;    // m/s ต่ำกว่านี้ถือว่าบอลเกือบหยุด
+export const BALL_MIN_BOUNCE_VZ = 1.2;       // m/s |velocityZ| ต่ำกว่านี้เลิกเด้ง
+export const PLAYER_TOUCH_RADIUS = 1.6;      // ระยะที่ผู้เล่นเอื้อมแตะ/รับบอล
+export const PLAYER_BLOCK_RADIUS = 1.25;     // ระยะบล็อก/แฉลบเมื่อบอลพุ่งผ่าน
+export const BALL_REACH_HEIGHT = 2.2;        // ความสูงบอลสูงสุดที่ผู้เล่นยังเอื้อมถึง (เมตร)
+export const DEFLECTION_NOISE = 0.5;         // เรเดียน ค่าคลาดเคลื่อนของมุมแฉลบ
+export const POST_REBOUND_POWER = 0.6;       // แรงเด้งกลับจากเสา/คาน
+export const POST_HIT_CHANCE = 0.07;         // โอกาสลูกที่ไม่เข้าไปชนเสา (เมื่อมุมดี)
+export const GK_HOLD_CHANCE = 0.55;          // เซฟแล้วรับติดมือ (ที่เหลือ = ปัดออก)
+export const GK_PARRY_POWER = 9;             // ความเร็วบอลที่ GK ปัดออก (m/s)
+export const GK_PARRY_CENTER_CHANCE = 0.3;   // โอกาสปัดไปกลางประตู (เสี่ยงซ้ำ) ที่เหลือปัดออกข้าง
+export const SECOND_BALL_RADIUS = 18;        // รัศมีพิจารณาการแย่ง second ball (เมตร)
+export const FIRST_TOUCH_LOOSE = 0.2;        // first touch ต่ำกว่านี้ = บอลหลุดเป็น loose
+export const FIRST_TOUCH_CLEAN = 0.36;       // สูงกว่านี้ = รับเรียบทันที (ลูกง่ายต้องรับได้)
