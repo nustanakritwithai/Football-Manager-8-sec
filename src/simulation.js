@@ -59,9 +59,10 @@ export function startSimulation(state) {
     ballStart: { x: state.ball.x, y: state.ball.y },
     possessionStart: state.possessionTeam,
     pendingPass: null,        // { fromId, startX, toRunner }
+    justReceived: new Map(),  // playerId -> tick ที่เพิ่งได้บอล (first-time shot bonus)
     stats: {
-      home: { passes: 0, carries: 0, dribbles: 0, runs: 0 },
-      away: { passes: 0, carries: 0, dribbles: 0, runs: 0 },
+      home: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0 },
+      away: { passes: 0, carries: 0, dribbles: 0, runs: 0, shots: 0, cutbacks: 0, missedShots: 0 },
     },
     congestion: null,
     lastAction: null,         // ป้าย action ล่าสุดของผู้ถือบอล (แสดงบนสนาม)
@@ -435,6 +436,7 @@ function updateBall(state) {
     }
     if (nearest && best < 1.1) {
       giveBall(state, nearest);
+      state.sim?.justReceived.set(nearest.id, state.sim.tick);
       recordEvent(state, `${nearest.team === 'home' ? 'Our' : 'Their'} ${nearest.role} recovered loose ball`);
     }
   }
@@ -451,6 +453,7 @@ function resolvePassArrival(state) {
     const sameTeam = nearest.team === b.lastTouchTeam;
     labelPendingPass(state, sameTeam ? 1 : 0);
     giveBall(state, nearest);
+    state.sim?.justReceived.set(nearest.id, state.sim.tick);
     if (sameTeam) {
       state.sim.stats[nearest.team].passes++;
       updatePassMemory(state, nearest);
@@ -541,24 +544,58 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const dir = attackDir(carrier.team);
   const goal = goalAttackedBy(carrier.team);
   const dGoal = distP(carrier, goal);
+  const inAttThird = dir === 1 ? carrier.x > 70 : carrier.x < 35;
   const acts = [];
 
-  // --- SHOOT ---
-  const shootRange = 17 + carrier.shooting / 12;
-  if (dGoal < shootRange && Math.abs(carrier.y - 34) < 18) {
-    acts.push({
-      type: 'shoot',
-      score: 0.45 + (1 - dGoal / 30) * 0.45 + carrier.shooting / 400
-        - pressure * 0.15 + (phase === 'FINAL_THIRD' ? 0.1 : 0),
-    });
-  }
+  // --- SHOOT (P2.6: finishing instinct + zone logic) ---
+  const shot = evaluateShotAction(state, carrier, pressure);
 
   // --- PASS ---
   const opts = passOptions(state, carrier, pressure);
+
+  // tap-in exception: เราอยู่โซนยิงแต่มีเพื่อนในกรอบที่ยิงง่ายกว่าชัดเจน → จ่ายดีกว่า
+  let tapIn = null;
+  if (inAttThird && shot) {
+    for (const o of opts.slice(0, 4)) {
+      const mateBox = dir === 1 ? o.mate.x > PITCH.length - 20 : o.mate.x < 20;
+      if (!mateBox || Math.abs(o.mate.y - 34) > 14 || o.laneSafety < 0.5 || o.d > 18) continue;
+      const mateXg = shotXgAt(state, o.mate, o.mate.x, o.mate.y, 0.5);
+      if (mateXg > shot.xg + 0.12) {
+        o.score += 0.28;
+        o.tapIn = true;
+        if (!tapIn || mateXg > tapIn.xg) tapIn = { option: o, xg: mateXg };
+      }
+    }
+  }
+
+  // cutback: อยู่ริมกรอบ/มุมยิงแคบ → หาตัวกลางกรอบหรือ zone 14 แทนการยิงมั่ว/ส่งคืนหลัง
+  let cutbackChosenOverShot = false;
+  if (inAttThird && shot && shot.angle < 0.18) {
+    for (const o of opts.slice(0, 5)) {
+      const central = Math.abs(o.mate.y - 34) < 11;
+      const nearBox = dir === 1 ? o.mate.x > PITCH.length - 22 : o.mate.x < 22;
+      if (central && nearBox && o.laneSafety > 0.35 && o.forward > -0.4) {
+        o.score += 0.25;
+        o.cutback = true;
+        cutbackChosenOverShot = true;
+      }
+    }
+    if (cutbackChosenOverShot) shot.score -= 0.25; // มุมแคบ อย่าฝืนยิง
+  }
+
+  if (shot) {
+    if (tapIn) shot.score -= 0.15; // มีตัว tap-in โล่งกว่า
+    acts.push(shot);
+  }
+
+  // sort options ใหม่หลังเพิ่ม bonus
+  opts.sort((a, b) => b.score - a.score);
   if (opts[0]) {
     let s = opts[0].score + 0.1;
     if (objective === 'buildUp' || objective === 'holdPossession') s += 0.06;
     if (pressure > 1.2) s += 0.1; // โดนบีบ การจ่ายปลอดภัยน่าสนใจขึ้น
+    // final third: ส่งคืนหลังโดยไม่มีเหตุผลเสียจังหวะจบสกอร์
+    if (inAttThird && opts[0].forward < -0.1 && !opts[0].cutback && pressure < 1.2) s -= 0.12;
     acts.push({ type: 'pass', option: opts[0], score: s });
   }
 
@@ -575,7 +612,16 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
     if (objective === 'holdPossession') s -= 0.1;
     if (carrier.role === 'CB' && phase === 'BUILD_UP') s -= 0.08; // CB carry ได้แต่ระวัง
     if (carrier.role === 'GK') s = -1;
-    acts.push({ type: 'carry', score: s, target: carryTarget(state, carrier, space) });
+    const target = carryTarget(state, carrier, space);
+    // P2.6: ใน final third ห้าม carry เพลินจนพลาดจังหวะยิง
+    if (inAttThird) {
+      s -= 0.06;
+      const xgNow = shot?.xg ?? 0;
+      const xgAfter = shotXgAt(state, carrier, target.x, target.y, pressure);
+      if (xgAfter - xgNow < 0.02) s -= 0.12; // carry แล้วมุมยิงไม่ดีขึ้น = ไร้เหตุผล
+    }
+    if (shot?.zone === 'must') s -= 0.25;
+    acts.push({ type: 'carry', score: s, target });
   }
 
   // --- DRIBBLE: เลี้ยงฝ่า 1v1 ---
@@ -594,11 +640,13 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   const support = state.players.filter(
     (m) => m.team === carrier.team && m.id !== carrier.id && distP(m, carrier) < 14
   ).length;
-  acts.push({
-    type: 'hold',
-    score: 0.2 + (support < 2 ? 0.12 : 0) - pressure * 0.16
-      + (phase === 'TRANSITION_TO_ATTACK' && support < 2 ? 0.08 : 0),
-  });
+  let holdScore = 0.2 + (support < 2 ? 0.12 : 0) - pressure * 0.16
+    + (phase === 'TRANSITION_TO_ATTACK' && support < 2 ? 0.08 : 0);
+  // P2.6: ใกล้ประตูไม่ใช่ที่พักบอล — โดนบีบในกรอบต้องยิงเร็วหรือจ่ายจังหวะเดียว
+  if (inAttThird) holdScore -= 0.12;
+  if (shot?.zone === 'must') holdScore -= 0.2;
+  if (dGoal < 25 && pressure > 0.8) holdScore -= 0.15;
+  acts.push({ type: 'hold', score: holdScore });
 
   // --- CLEAR: เคลียร์เมื่อเสี่ยงหน้ากรอบตัวเอง ---
   const ownProgress = dir === 1 ? carrier.x : PITCH.length - carrier.x;
@@ -607,7 +655,92 @@ export function evaluateBallCarrierAction(state, carrier, pressure) {
   }
 
   acts.sort((a, b) => b.score - a.score);
-  return acts[0];
+  const best = acts[0];
+
+  // P2.6: ตรวจ "ควรยิงแต่ไม่ยิง" — เลือก carry/hold/dribble ทั้งที่อยู่ must-shoot zone
+  if (shot?.zone === 'must' && ['carry', 'hold', 'dribble'].includes(best.type) && !tapIn) {
+    recordEvent(state, `Must-shoot chance ignored — ${carrier.team === 'home' ? 'our' : 'their'} ${carrier.role} chose ${best.type}`);
+    if (state.sim) state.sim.stats[carrier.team].missedShots++;
+  }
+  return best;
+}
+
+// ---------- P2.6: Finishing decision ----------
+
+// มุมเปิดของประตูจากตำแหน่งผู้ยิง (radians ระหว่างเสาสองข้าง)
+function goalOpenAngle(p, team) {
+  const gx = team === 'home' ? PITCH.length : 0;
+  const a1 = Math.atan2(34 - 3.66 - p.y, gx - p.x);
+  const a2 = Math.atan2(34 + 3.66 - p.y, gx - p.x);
+  let diff = Math.abs(a2 - a1);
+  if (diff > Math.PI) diff = 2 * Math.PI - diff;
+  return diff;
+}
+
+// จำนวนผู้เล่นฝ่ายรับที่ขวางเส้นยิง (block risk)
+function countBlockers(state, p, team) {
+  const gx = team === 'home' ? PITCH.length : 0;
+  let n = 0;
+  for (const o of state.players) {
+    if (o.team === team || o.role === 'GK') continue;
+    if (pointSegDist(o.x, o.y, p.x, p.y, gx, 34) < 1.3) n++;
+  }
+  return n;
+}
+
+// xG เชิงตัดสินใจ ณ ตำแหน่งสมมติ (ใช้เทียบว่า carry แล้วมุมยิงดีขึ้นไหม)
+function shotXgAt(state, carrier, x, y, pressure) {
+  const fake = { x, y, team: carrier.team, shooting: carrier.shooting };
+  const angle = goalOpenAngle(fake, carrier.team);
+  const gx = carrier.team === 'home' ? PITCH.length : 0;
+  const d = Math.hypot(gx - x, 34 - y);
+  if (d > 32) return 0;
+  return clamp(
+    clamp(angle / 0.55, 0, 1) * (1 - d / 36) * (0.5 + carrier.shooting / 180) / (1 + pressure * 0.5),
+    0, 0.9
+  );
+}
+
+// ประเมิน action ยิง: คืน { type:'shoot', score, zone, xg, angle, dGoal } หรือ null
+export function evaluateShotAction(state, carrier, pressure) {
+  if (carrier.role === 'GK') return null;
+  const goal = goalAttackedBy(carrier.team);
+  const dGoal = distP(carrier, goal);
+  if (dGoal > 30) return null; // ไกลเกิน ไม่พิจารณาเลย (ห้ามยิงมั่ว)
+
+  const angle = goalOpenAngle(carrier, carrier.team);
+  const blockers = countBlockers(state, carrier, carrier.team);
+  const xg = shotXgAt(state, carrier, carrier.x, carrier.y, pressure);
+
+  // first-time opportunity: เพิ่งได้บอลในจังหวะเดียว ยิงเลยได้เปรียบ
+  const recvTick = state.sim?.justReceived.get(carrier.id);
+  const firstTime = recvTick != null && state.sim.tick - recvTick <= 6;
+
+  // โซนการยิง — ใกล้ประตูแล้ว pressure ไม่ใช่เหตุผลที่จะไม่ยิง (ยิงเร็วแทน)
+  let zone = 'normal';
+  if (dGoal < 16 && angle > 0.24 && blockers <= 2) zone = 'must';
+  else if (dGoal < 22 && angle > 0.15) zone = 'good';
+  else if (dGoal > 27 || angle < 0.09 || blockers >= 4) zone = 'bad';
+
+  let score;
+  switch (zone) {
+    case 'must':
+      // shot urgency: ในกรอบมุมเปิด ต้องชนะ pass/carry/hold เกือบทุกกรณี
+      score = 0.95 + xg * 0.4 - blockers * 0.07 - clamp(pressure - 2, 0, 1) * 0.1;
+      break;
+    case 'good':
+      score = 0.62 + xg * 0.6 - blockers * 0.06 - clamp(pressure - 1.8, 0, 1) * 0.08;
+      break;
+    case 'bad':
+      score = 0.05;
+      break;
+    default:
+      score = 0.42 + xg * 0.55 - blockers * 0.05 - clamp(pressure - 1.2, 0, 1) * 0.08;
+  }
+  if (firstTime && zone !== 'bad') score += 0.08;
+  if (state.teamPhases[carrier.team] === 'FINAL_THIRD' && zone !== 'bad') score += 0.06;
+
+  return { type: 'shoot', score, zone, xg, angle, dGoal, blockers };
 }
 
 function carryAbility(p) {
@@ -716,7 +849,7 @@ function executeCarrierAction(state, carrier, action, pressure) {
       sim.carrierMove.set(carrier.id, { x: carrier.x, y: carrier.y, mode: 'hold' });
       break;
     case 'shoot':
-      attemptShot(state, carrier, distP(carrier, goalAttackedBy(carrier.team)), pressure);
+      attemptShot(state, carrier, distP(carrier, goalAttackedBy(carrier.team)), pressure, action.zone);
       break;
     case 'clear': {
       const dir = attackDir(carrier.team);
@@ -861,20 +994,28 @@ function executePass(state, owner, option, pressure) {
     option.aimY + Math.sin(ang) * errMag);
   state.ball.ownerPlayerId = null;
   state.possessionTeam = owner.team;
-  if (option.runner) {
+  if (option.cutback) {
+    state.sim.stats[owner.team].cutbacks++;
+    recordEvent(state, `Cutback chance created — ${owner.team === 'home' ? 'our' : 'their'} ${owner.role} pulls it back for ${option.mate.role}`);
+    recordEvent(state, 'Bad angle: chose cutback instead of shot');
+  } else if (option.tapIn) {
+    recordEvent(state, `${owner.team === 'home' ? 'Our' : 'Their'} ${owner.role} squares it for an easier finish (${option.mate.role})`);
+  } else if (option.runner) {
     recordEvent(state, `Through pass for ${option.mate.role} running into space (${owner.team === 'home' ? 'us' : 'them'})`);
   } else if (option.forward > 0.5 && option.laneSafety > 0.6) {
     recordEvent(state, `${owner.team === 'home' ? 'Our' : 'Their'} ${owner.role} found forward passing lane`);
   }
 }
 
-function attemptShot(state, owner, dGoal, pressure) {
+function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
   const angleFactor = clamp(1 - Math.abs(owner.y - 34) / 22, 0.15, 1);
   const prob = clamp(
     0.5 * (1 - dGoal / 32) * (owner.shooting / 85) * angleFactor / (1 + pressure * 0.8),
     0.02, 0.45
   );
-  recordEvent(state, `Shot chance! ${owner.team === 'home' ? 'Our' : 'Their'} ${owner.role} shoots from ${Math.round(dGoal)}m`);
+  state.sim.stats[owner.team].shots++;
+  const zoneNote = zone === 'must' || zone === 'good' ? ' (good position)' : '';
+  recordEvent(state, `Shot chance! ${owner.team === 'home' ? 'Our' : 'Their'} ${owner.role} shoots from ${Math.round(dGoal)}m${zoneNote}`);
 
   if (Math.random() < prob) {
     state.score[owner.team]++;
