@@ -73,6 +73,8 @@ function playEventSound(e) {
   } else if (e.startsWith('Shot chance')) {
     playKick();
     if (e.includes('[BIG CHANCE]')) playOoh();
+  } else if (e.startsWith('Referee whistles')) {
+    playWhistle('short'); // P3.2: นกหวีดก่อนเตะลูกตั้งเตะ
   } else if (e.startsWith('Free kick') || e.includes('PENALTY') || e.includes('Foul in the box') || e.includes('Yellow card')) {
     playWhistle('short');
   }
