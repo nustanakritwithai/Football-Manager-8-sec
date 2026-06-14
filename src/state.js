@@ -17,7 +17,7 @@ export function createInitialState(opts = '4-2-3-1') {
     ? createTeam('home', homeData.name, homeData.color, homeFormation, {
         short: homeData.short, color2: homeData.color2, strength: homeData.strength,
         strengthBonus: strengthBonus(homeData.strength), styleName: homeData.style,
-        teamDataId: homeData.id,
+        teamDataId: homeData.id, roster: homeData.roster,
       })
     : createTeam('home', 'Tactic Lab FC', '#2f6fed', homeFormation);
 
@@ -26,7 +26,7 @@ export function createInitialState(opts = '4-2-3-1') {
     ? createTeam('away', awayData.name, awayData.color, awayData.formation || '4-3-3', {
         short: awayData.short, color2: awayData.color2, strength: awayData.strength,
         strengthBonus: strengthBonus(awayData.strength), styleName: awayStyle,
-        teamDataId: awayData.id,
+        teamDataId: awayData.id, roster: awayData.roster,
       })
     : createTeam('away', 'Rival United', '#e0473d', '4-3-3', { styleName: awayStyle });
 

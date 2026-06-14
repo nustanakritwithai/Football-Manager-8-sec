@@ -19,9 +19,14 @@ const ROLE_BASE = {
 
 export const ROLE_LIST = Object.keys(ROLE_BASE);
 
-export function createPlayer({ id, name, team, role, number, x, y, strengthBonus = 0 }) {
+export function createPlayer({ id, name, team, role, number, x, y, strengthBonus = 0, overrides = null }) {
   const base = ROLE_BASE[role] || ROLE_BASE.CM;
-  const vary = (v) => clamp(Math.round(v + strengthBonus + rand(-6, 6)), 20, 95);
+  const ov = overrides || {};
+  // ดาวเด่น (มี overrides) = ค่าพลังเฉพาะตัวคงที่ (แกว่งเล็กน้อย ±2, เพดาน 99)
+  // นักเตะทั่วไป = role base + โบนัสตามเรตติ้งทีม + แกว่ง ±6
+  const attr = (key) => (key in ov)
+    ? clamp(Math.round(ov[key] + rand(-2, 2)), 20, 99)
+    : clamp(Math.round(base[key] + strengthBonus + rand(-6, 6)), 20, 95);
   return {
     id,
     name,
@@ -31,17 +36,18 @@ export function createPlayer({ id, name, team, role, number, x, y, strengthBonus
     x, y,                 // ตำแหน่งจริงปัจจุบัน (เมตร)
     targetX: x, targetY: y, // ตำแหน่งที่ผู้เล่น/แผนสั่งไว้ (anchor)
     baseX: x, baseY: y,     // ตำแหน่งตาม formation
-    speed: vary(base.speed),
+    speed: attr('speed'),
     stamina: 100,
-    passing: vary(base.passing),
-    pressing: vary(base.pressing),
-    tackling: vary(base.tackling),
-    vision: vary(base.vision),
-    positioning: vary(base.positioning),
-    shooting: vary(base.shooting),
-    discipline: vary(base.discipline),
-    aggression: vary(base.aggression),
-    decision: vary(base.decision),
+    passing: attr('passing'),
+    pressing: attr('pressing'),
+    tackling: attr('tackling'),
+    vision: attr('vision'),
+    positioning: attr('positioning'),
+    shooting: attr('shooting'),
+    discipline: attr('discipline'),
+    aggression: attr('aggression'),
+    decision: attr('decision'),
+    isStar: !!overrides,
     isSelected: false,
     pathHistory: [],
     // P2: คำสั่งโค้ช — ลาก = ตั้งเจตนา ไม่ใช่ย้ายตำแหน่ง

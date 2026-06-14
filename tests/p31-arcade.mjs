@@ -77,5 +77,24 @@ const avgAttr = (players) => {
   console.log('Full-match + save/load OK');
 }
 
+// ---- 6) ดาวเด่นมีชื่อ + ค่าพลังตามโปรไฟล์ ----
+{
+  const s = createInitialState({ homeTeamId: 'man-sky', awayTeamId: 'mersey-red' });
+  const all = [...s.players, ...s.benches.home, ...s.benches.away];
+  const star = all.find((p) => p.name === 'E. Halund');
+  assert(star, 'ต้องมีดาวเด่นชื่อ E. Halund (Haaland homage)');
+  assert(star.shooting >= 90 && star.isStar, `ดาวเด่นต้องค่าพลังสูงตามโปรไฟล์ (shooting=${star?.shooting})`);
+  assert(s.players.some((p) => p.id === star.id), 'ดาวเด่นควรได้เป็นตัวจริง');
+  const rodri = s.players.find((p) => p.name === 'Rodry');
+  assert(rodri && rodri.role === 'DM' && rodri.passing >= 84, 'Rodry ต้องเป็น DM passing สูง');
+  // away ที่เลือกก็ต้องมีดาวของตัวเอง
+  const salah = [...s.players, ...s.benches.away].find((p) => p.name === 'M. Sallah');
+  assert(salah && salah.team === 'away' && salah.speed >= 86, 'คู่แข่งต้องมีดาวเด่นของตัวเอง (M. Sallah)');
+  // ทีมไม่มี roster (เช่น ipswich) ต้องยังสร้างได้ครบ
+  const s2 = createInitialState({ homeTeamId: 'ipswich', awayTeamId: 'saints' });
+  assert(s2.players.filter((p) => p.team === 'home').length === 11, 'ทีมไม่มี roster ต้องยังครบ 11');
+  console.log(`Star roster OK — E. Halund SHO ${star.shooting}, Rodry PAS ${rodri.passing}, away star M. Sallah SPD ${salah.speed}`);
+}
+
 if (failures) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log('\nALL P3.1 ARCADE TESTS PASS ✅');
