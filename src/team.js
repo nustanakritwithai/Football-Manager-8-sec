@@ -60,33 +60,47 @@ export function createTeam(teamId, teamName, color, formationName, opts = {}) {
   const slots = FORMATIONS[formationName];
   const names = teamId === 'home' ? HOME_NAMES : AWAY_NAMES;
   const sBonus = opts.strengthBonus ?? 0;
+  // ดาวเด่นของทีม: จับเข้าช่อง formation ตาม role (ตัวที่เหลือไปนั่งสำรอง)
+  const roster = (opts.roster || []).map((s) => ({ ...s }));
+  const takeStar = (role) => {
+    const i = roster.findIndex((s) => !s._used && s.role === role);
+    if (i < 0) return null;
+    roster[i]._used = true;
+    return roster[i];
+  };
+
   const players = slots.map((slot, i) => {
     const pos = formationToField(slot, teamId);
+    const star = takeStar(slot.role);
     return createPlayer({
       id: `${teamId}-${i}`,
-      name: names[i % names.length],
+      name: star ? star.name : names[i % names.length],
       team: teamId,
       role: slot.role,
       number: i + 1,
       x: pos.x,
       y: pos.y,
       strengthBonus: sBonus,
+      overrides: star ? star.a : null,
     });
   });
 
   // ตัวสำรอง 7 คน (id: home-b0.. / away-b0..) — อยู่นอก state.players จึงไม่ถูกจำลอง
+  // ดาวที่ไม่ได้ช่องตัวจริงจะมานั่งสำรองก่อน (เป็นตัวสำรองระดับซูเปอร์ซับ)
   const bench = BENCH_ROLES.map((role, i) => {
     const norm = ROLE_HOME_NORM[role] || ROLE_HOME_NORM.CM;
     const pos = formationToField(norm, teamId);
+    const star = takeStar(role);
     return createPlayer({
       id: `${teamId}-b${i}`,
-      name: names[(slots.length + i) % names.length],
+      name: star ? star.name : names[(slots.length + i) % names.length],
       team: teamId,
       role,
       number: slots.length + i + 1,
       x: pos.x,
       y: pos.y,
-      strengthBonus: sBonus - 4, // ตัวสำรองอ่อนกว่าตัวจริงเล็กน้อย
+      strengthBonus: star ? sBonus : sBonus - 4, // ตัวสำรองทั่วไปอ่อนกว่าเล็กน้อย, ดาวคงค่าเต็ม
+      overrides: star ? star.a : null,
     });
   });
 
