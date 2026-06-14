@@ -8,7 +8,7 @@ import { drawPitch } from './pitch.js';
 import { drawPlayer } from './player.js';
 import { drawBall } from './ball.js';
 import { initInput } from './input.js';
-import { initUI, updateDashboard, drawOverlays, drawTooltip, setStatus, setPreviewSummary } from './ui.js';
+import { initUI, updateDashboard, drawOverlays, drawTooltip, setStatus, setPreviewSummary, syncControls } from './ui.js';
 import { saveToLocal, loadFromLocal, exportJSON, importJSON, exportDataset } from './saveLoad.js';
 import { runPreview } from './preview.js';
 import { suggestDefensiveAdjustments, applyGhostsAsCommands } from './refine.js';
@@ -20,6 +20,7 @@ import { deepClone } from './utils.js';
 import { getPlayer, teamPlayers } from './team.js';
 import { giveBall } from './ball.js';
 import { initTactics, openTactics } from './tactics.js';
+import { initTeamSelect, openTeamSelect } from './teamselect.js';
 import {
   initAudio, unlockAudio, toggleSound, isSoundOn,
   playWhistle, playCheer, playKick, playSave, playPost, playOoh,
@@ -102,6 +103,22 @@ initTactics(state, {
 document.getElementById('btnTactics').addEventListener('click', () => {
   if (state.phase === 'simulating') { setStatus('ปรับแผนระหว่างจำลองไม่ได้ — รอจบเทิร์น', true); return; }
   openTactics();
+});
+
+// P3.1 Arcade: เลือกทีม → เริ่มแมตช์ใหม่ (มิวเทต state เดิมเพื่อให้ closure ทั้งหมดอ้างถึงต่อได้)
+function startMatch(homeId, awayId) {
+  Object.assign(state, createInitialState({ homeTeamId: homeId, awayTeamId: awayId }));
+  state.tacticalScores = analyze(state).scores;
+  state.ui.scoresDirty = false;
+  whatIfStash = null;
+  syncControls(state);
+  setStatus(`เริ่มแมตช์: ${state.teams.home.teamName} พบ ${state.teams.away.teamName}`);
+  updateDashboard(state);
+}
+initTeamSelect({ onStart: startMatch });
+document.getElementById('btnNewMatch').addEventListener('click', () => {
+  if (state.phase === 'simulating') { setStatus('รอจบเทิร์นก่อนเริ่มแมตช์ใหม่', true); return; }
+  openTeamSelect();
 });
 
 initUI(state, {
@@ -293,6 +310,9 @@ initUI(state, {
 state.tacticalScores = analyze(state).scores;
 state.ui.scoresDirty = false;
 updateDashboard(state);
+
+// P3.1: เปิดหน้าจอเลือกทีมทันทีตอนเข้าเกม (อาเขต)
+openTeamSelect();
 
 // ---------- game loop ----------
 

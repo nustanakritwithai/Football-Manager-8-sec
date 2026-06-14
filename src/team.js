@@ -59,6 +59,7 @@ export function formationToField(slot, team) {
 export function createTeam(teamId, teamName, color, formationName, opts = {}) {
   const slots = FORMATIONS[formationName];
   const names = teamId === 'home' ? HOME_NAMES : AWAY_NAMES;
+  const sBonus = opts.strengthBonus ?? 0;
   const players = slots.map((slot, i) => {
     const pos = formationToField(slot, teamId);
     return createPlayer({
@@ -69,6 +70,7 @@ export function createTeam(teamId, teamName, color, formationName, opts = {}) {
       number: i + 1,
       x: pos.x,
       y: pos.y,
+      strengthBonus: sBonus,
     });
   });
 
@@ -84,6 +86,7 @@ export function createTeam(teamId, teamName, color, formationName, opts = {}) {
       number: slots.length + i + 1,
       x: pos.x,
       y: pos.y,
+      strengthBonus: sBonus - 4, // ตัวสำรองอ่อนกว่าตัวจริงเล็กน้อย
     });
   });
 
@@ -97,7 +100,11 @@ export function createTeam(teamId, teamName, color, formationName, opts = {}) {
     team: {
       teamId,
       teamName,
+      short: opts.short ?? teamName.slice(0, 3).toUpperCase(),
       color,
+      color2: opts.color2 ?? '#ffffff',
+      strength: opts.strength ?? 3,
+      teamDataId: opts.teamDataId ?? null,
       formation: formationName,
       players: players.map((p) => p.id),
       strategy: styleName || 'Balanced',

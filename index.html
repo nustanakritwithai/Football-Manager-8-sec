@@ -37,6 +37,7 @@
 
     <aside id="panel">
       <section class="card">
+        <button id="btnNewMatch" class="btn-tactics">🏟 เลือกทีม / แมตช์ใหม่</button>
         <button id="btnTactics" class="btn-tactics">⚙ ปรับแผน / Tactics</button>
         <button id="btnPlay" class="btn-play">▶ Play Next 8 Seconds</button>
         <div class="row">
@@ -138,6 +139,28 @@
   </div>
 
   <div id="tooltip"></div>
+
+  <!-- P3.1 Arcade: หน้าจอเลือกทีม -->
+  <div id="teamSelectModal" class="tactics-modal">
+    <div class="tactics-box ts-box">
+      <header class="tactics-head">
+        <h2>🏟 เลือกทีม — Premier Arcade</h2>
+        <span id="tsPrompt" class="tactics-subs"></span>
+      </header>
+      <div class="ts-vs">
+        <div class="ts-side ts-you"><span class="ts-label">ทีมของคุณ</span><div id="tsHomePick" class="ts-pick"></div></div>
+        <div class="ts-mid">VS</div>
+        <div class="ts-side ts-opp"><span class="ts-label">คู่แข่ง</span><div id="tsAwayPick" class="ts-pick"></div></div>
+      </div>
+      <div class="ts-actions">
+        <button id="tsRandom" class="btn-sm">🎲 สุ่มคู่แข่ง</button>
+        <button id="tsReset" class="btn-sm">↺ ล้างที่เลือก</button>
+        <button id="tsStart" class="btn-play ts-start" disabled>⚽ Kick Off!</button>
+      </div>
+      <div id="teamGrid" class="team-grid"></div>
+      <p class="ts-note muted">ชื่อทีมเป็นเวอร์ชันสมมติ (อิงเมือง/สี) ไม่ใช้เครื่องหมายการค้าจริง · ดาวยิ่งมาก = ทีมยิ่งแกร่ง</p>
+    </div>
+  </div>
 
   <!-- P3.0: Tactics modal (Football Manager-style) -->
   <div id="tacticsModal" class="tactics-modal">

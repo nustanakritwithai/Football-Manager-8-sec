@@ -19,9 +19,9 @@ const ROLE_BASE = {
 
 export const ROLE_LIST = Object.keys(ROLE_BASE);
 
-export function createPlayer({ id, name, team, role, number, x, y }) {
+export function createPlayer({ id, name, team, role, number, x, y, strengthBonus = 0 }) {
   const base = ROLE_BASE[role] || ROLE_BASE.CM;
-  const vary = (v) => clamp(Math.round(v + rand(-6, 6)), 20, 95);
+  const vary = (v) => clamp(Math.round(v + strengthBonus + rand(-6, 6)), 20, 95);
   return {
     id,
     name,

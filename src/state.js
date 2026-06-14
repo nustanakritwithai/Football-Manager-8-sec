@@ -4,11 +4,31 @@ import { MATCH_TURNS, MAX_EVENTS_PER_TURN, SIM_SPEED_DEFAULT } from './config.js
 import { FORMATIONS } from './formations.js';
 import { createBall, giveBall } from './ball.js';
 import { createTeam, formationToField, randomAwayStyle, teamPlayers } from './team.js';
+import { getTeamData, strengthBonus } from './teams-data.js';
 
-export function createInitialState(homeFormation = '4-2-3-1') {
-  const awayStyle = randomAwayStyle();
-  const home = createTeam('home', 'Tactic Lab FC', '#2f6fed', homeFormation);
-  const away = createTeam('away', 'Rival United', '#e0473d', '4-3-3', { styleName: awayStyle });
+// opts: string = formation (เข้ากันได้กับโค้ดเดิม/เทสต์) | object = { homeTeamId, awayTeamId, homeFormation }
+export function createInitialState(opts = '4-2-3-1') {
+  const o = typeof opts === 'string' ? { homeFormation: opts } : (opts || {});
+  const homeData = o.homeTeamId ? getTeamData(o.homeTeamId) : null;
+  const awayData = o.awayTeamId ? getTeamData(o.awayTeamId) : null;
+
+  const homeFormation = o.homeFormation || homeData?.formation || '4-2-3-1';
+  const home = homeData
+    ? createTeam('home', homeData.name, homeData.color, homeFormation, {
+        short: homeData.short, color2: homeData.color2, strength: homeData.strength,
+        strengthBonus: strengthBonus(homeData.strength), styleName: homeData.style,
+        teamDataId: homeData.id,
+      })
+    : createTeam('home', 'Tactic Lab FC', '#2f6fed', homeFormation);
+
+  const awayStyle = awayData?.style || randomAwayStyle();
+  const away = awayData
+    ? createTeam('away', awayData.name, awayData.color, awayData.formation || '4-3-3', {
+        short: awayData.short, color2: awayData.color2, strength: awayData.strength,
+        strengthBonus: strengthBonus(awayData.strength), styleName: awayStyle,
+        teamDataId: awayData.id,
+      })
+    : createTeam('away', 'Rival United', '#e0473d', '4-3-3', { styleName: awayStyle });
 
   const state = {
     phase: 'planning', // planning | simulating | finished

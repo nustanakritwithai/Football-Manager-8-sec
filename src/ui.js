@@ -135,6 +135,18 @@ export function initUI(state, handlers) {
   }
 }
 
+// P3.1: ซิงก์คอนโทรล (formation/instructions) ให้ตรง state หลังเริ่มแมตช์ใหม่
+export function syncControls(state) {
+  const t = state.teams.home;
+  if (els.formation) els.formation.value = t.formation;
+  if (els.pressingLevel) els.pressingLevel.value = t.pressingLevel;
+  if (els.defensiveLine) els.defensiveLine.value = t.defensiveLine;
+  if (els.attackingWidth) els.attackingWidth.value = t.attackingWidth;
+  if (els.passingStyle) els.passingStyle.value = t.passingStyle;
+  if (els.tempo) els.tempo.value = t.tempo;
+  if (els.riskLevel) els.riskLevel.value = t.riskLevel;
+}
+
 export function setPreviewSummary(text) {
   if (els.previewSummary) els.previewSummary.textContent = text || '';
 }
