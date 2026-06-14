@@ -43,7 +43,14 @@ export function setupCornerScenario(state) {
     [PITCH.length - 11, 38],  // กลางกรอบ
     [PITCH.length - 13, 27],  // มุมเขตโทษ
   ];
-  attackers.slice(0, 4).forEach((p, i) => place(p, boxSpots[i][0], boxSpots[i][1]));
+  attackers.slice(0, 4).forEach((p, i) => {
+    place(p, boxSpots[i][0], boxSpots[i][1]);
+    // ตรึงให้ยืน/วิ่งจุดโหม่ง ไม่ให้ logic ปกติดึงออกจากกรอบก่อนบอลมาถึง
+    p.commandLocked = true;
+    p.runType = 'runIntoSpace';
+    p.runTarget = { x: boxSpots[i][0], y: boxSpots[i][1] };
+    p.setPieceAnchor = { x: boxSpots[i][0], y: boxSpots[i][1] };
+  });
 
   // second ball + กันสวน
   const rest = home.filter((p) => !used.has(p.id));
@@ -93,8 +100,8 @@ export function setupCornerScenario(state) {
   state.ball.x = taker.x;
   state.ball.y = taker.y;
   giveBall(state, taker);
-  // P2.9: ตั้งเป็นลูกเตะมุม — คนเตะจะเปิดเข้ากรอบลุ้นโหม่ง ไม่เลี้ยงเอง
-  state.setPiece = { type: 'corner', takerId: taker.id, deliverTick: 5 };
+  // P3.2: ตั้งเป็นลูกเตะมุม — รอเป่านกหวีดแล้วเปิดเข้ากรอบลุ้นโหม่ง (ไม่เลี้ยงเอง)
+  state.setPiece = { type: 'corner', takerId: taker.id, deliverTick: 13, whistled: false, side: taker.y < 34 ? 'top' : 'bottom' };
   state.pendingPenalty = null;
 
   state.assistant = {
@@ -166,7 +173,7 @@ export function setupFreeKickScenario(state, spot) {
   state.ball.x = taker.x;
   state.ball.y = taker.y;
   giveBall(state, taker);
-  state.setPiece = { type: 'freeKick', takerId: taker.id, deliverTick: 5 };
+  state.setPiece = { type: 'freeKick', takerId: taker.id, deliverTick: 13, whistled: false };
   state.pendingPenalty = null;
 
   state.assistant = {

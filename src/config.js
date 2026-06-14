@@ -128,3 +128,9 @@ export const SHOT_TARGET_ERROR_BASE = 0.18;  // ความคลาดเค�
 export const SHOT_PRESSURE_ERROR = 0.07;     // ความคลาดเคลื่อนเพิ่มต่อ pressure
 export const POST_CHANCE_MAX = 0.08;         // โอกาสชนเสาสูงสุด (ลูกคุณภาพดี)
 export const REBOUND_CHANCE_BASE = 0.5;      // โอกาสที่ลูกเซฟ/บล็อกกลายเป็น rebound
+
+// P3.2: ลูกตั้งเตะ — จังหวะ "รอเป่านกหวีดแล้วค่อยเตะ" (tick ที่คนเตะรอก่อนเปิด/ยิง)
+export const SET_PIECE_WAIT_TICKS = 13;       // ~1.3s ตั้งท่า ก่อนเป่านกหวีด+เตะ
+export const SET_PIECE_WHISTLE_LEAD = 4;      // เป่านกหวีดล่วงหน้ากี่ tick ก่อนสัมผัสบอล
+export const HEADER_XG_FACTOR = 0.58;         // ลูกโหม่งทำประตูยากกว่าลูกเท้า (GK เซฟ/พลาดบ่อยขึ้น)
+export const NEAR_POST_FLICK_CHANCE = 0.4;    // โอกาสโหม่งเสาแรกแปะให้เสาไกล

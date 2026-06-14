@@ -16,6 +16,7 @@ import {
   GOAL_HEIGHT, SHOT_XG_MIN, SHOT_XG_MAX, BIG_CHANCE_XG, LONG_SHOT_MAX_XG,
   GK_BASE_REACH, GK_REACTION_WEIGHT, SHOT_TARGET_ERROR_BASE, SHOT_PRESSURE_ERROR,
   POST_CHANCE_MAX, REBOUND_CHANCE_BASE,
+  SET_PIECE_WAIT_TICKS, SET_PIECE_WHISTLE_LEAD, HEADER_XG_FACTOR, NEAR_POST_FLICK_CHANCE,
 } from './config.js';
 import { clamp, dist, distP, lerp, pointSegDist, rand } from './utils.js';
 import { maxSpeed, movementRadius, firstTouchAttr, reactionAttr } from './player.js';
@@ -132,6 +133,7 @@ function finishSimulation(state) {
     p.targetY = p.y;
     p.intendedTarget = null;
     p.commandLocked = false;
+    p.setPieceAnchor = null;
   }
 
   // นาฬิกาแมตช์ 90 นาที: แต่ละเทิร์น (action 8 วิ) เดินนาฬิกาแมตช์ทีละก้อน
@@ -664,32 +666,81 @@ function setupThrowIn(state, r) {
 }
 
 function setupFreeKick(state, r) {
-  const taker = nearestTeammateTo(state, r.team, r.spot);
+  const dir = attackDir(r.team);
+  const goalX = r.team === 'home' ? PITCH.length : 0;
+  const dGoal = Math.hypot(goalX - r.spot.x, 34 - r.spot.y);
+  // คนเตะ: ระยะยิงเลือกตัว shooting ดี / ไกลเลือกตัวเปิดบอลดี
+  const outfield = teamPlayers(state, r.team).filter((p) => p.role !== 'GK');
+  const taker = (dGoal < 28
+    ? [...outfield].sort((a, b) => b.shooting - a.shooting)[0]
+    : [...outfield].sort((a, b) => (b.passing + b.vision) - (a.passing + a.vision))[0])
+    || nearestTeammateTo(state, r.team, r.spot);
   taker.x = clamp(r.spot.x, 1, PITCH.length - 1);
   taker.y = clamp(r.spot.y, 1, PITCH.width - 1);
+  taker.targetX = taker.x; taker.targetY = taker.y;
+
+  // ฟรีคิกในแดนบุกแต่ไม่ใช่ระยะยิง → ดันตัวโหม่งเข้ากรอบเตรียมรับลูกเปิด
+  const advanced = (dir === 1 ? r.spot.x : PITCH.length - r.spot.x) > 60;
+  if (advanced && dGoal >= 28) {
+    const heads = outfield.filter((p) => p.id !== taker.id)
+      .sort((a, b) => (b.positioning + b.aggression) - (a.positioning + a.aggression)).slice(0, 3);
+    heads.forEach((p, i) => {
+      p.targetX = clamp(goalX - dir * 8, 6, PITCH.length - 6);
+      p.targetY = clamp(28 + i * 6, 18, 50);
+      p.runType = 'runIntoSpace'; p.runTarget = { x: p.targetX, y: p.targetY };
+    });
+  }
   placeBallAtRestartSpot(state.ball, taker.x, taker.y);
   giveBall(state, taker);
+  // P3.2: รอเป่านกหวีดก่อนเตะ (ยิง/เปิด/จ่าย ตัดสินใน setPieceAction)
+  state.setPiece = { type: 'freeKick', takerId: taker.id, deliverTick: SET_PIECE_WAIT_TICKS, whistled: false };
 }
 
 function setupCorner(state, r) {
   const dir = attackDir(r.team);
   const goalX = r.team === 'home' ? PITCH.length : 0;
-  const taker = nearestTeammateTo(state, r.team, r.spot);
-  // ดันตัวเป้าเข้า box (ST/CB ตัวสูง/AM/CM) — basic set piece shape
-  const targets = teamPlayers(state, r.team)
-    .filter((p) => p.role !== 'GK' && p.id !== taker.id && ['ST', 'CB', 'AM', 'CM'].includes(p.role))
-    .slice(0, 4);
-  const boxX = clamp(goalX - dir * 9, 6, PITCH.length - 6);
-  targets.forEach((p, i) => {
-    p.x = boxX;
-    p.y = clamp(28 + i * 4, 18, 50);
-    p.targetX = p.x; p.targetY = p.y;
-    p.runType = null; p.runTarget = null;
-  });
+  // คนเตะ: เลือกจาก passing/vision ดี (เปิดบอลแม่น) ใกล้มุม
+  const outfield = teamPlayers(state, r.team).filter((p) => p.role !== 'GK');
+  const taker = [...outfield].sort((a, b) => (b.passing + b.vision) - (a.passing + a.vision))[0]
+    || nearestTeammateTo(state, r.team, r.spot);
   taker.x = r.spot.x; taker.y = r.spot.y;
   taker.targetX = r.spot.x; taker.targetY = r.spot.y;
+
+  // ตัวบุกในกรอบ: เรียงตามความสามารถลูกกลางอากาศ (positioning+aggression+shooting) → ตัวเด่นสุดยืนจุดอันตราย
+  const attackers = outfield
+    .filter((p) => p.id !== taker.id)
+    .sort((a, b) => (b.positioning + b.aggression + b.shooting * 0.4) - (a.positioning + a.aggression + a.shooting * 0.4));
+  // จุดโหม่งหลากหลาย: เสาแรก, จุดโทษ(กลาง), เสาไกล, ขอบกรอบ(โหม่งต่อสอง/ซัดสอง)
+  const nearY = r.spot.y < 34 ? 30 : 38;     // เสาแรกฝั่งเดียวกับมุมที่เตะ
+  const farY = r.spot.y < 34 ? 40 : 28;      // เสาไกล
+  const headSpots = [
+    { x: clamp(goalX - dir * 5.5, 6, PITCH.length - 6), y: nearY },   // เสาแรก
+    { x: clamp(goalX - dir * 9,   6, PITCH.length - 6), y: 34 },      // กลาง/จุดโทษ
+    { x: clamp(goalX - dir * 6,   6, PITCH.length - 6), y: farY },    // เสาไกล
+    { x: clamp(goalX - dir * 13,  6, PITCH.length - 6), y: 34 },      // ขอบกรอบ (ซัดสอง)
+  ];
+  attackers.slice(0, 4).forEach((p, i) => {
+    const s = headSpots[i];
+    // เริ่มจากนอกกรอบเล็กน้อยแล้ว "วิ่งเข้า" จุดโหม่งระหว่างรอนกหวีด (สมจริง)
+    p.x = clamp(s.x - dir * 4, 4, PITCH.length - 4);
+    p.y = clamp(s.y + (i % 2 ? 3 : -3), 6, PITCH.width - 6);
+    p.targetX = s.x; p.targetY = s.y;
+    p.runType = 'runIntoSpace'; p.runTarget = { x: s.x, y: s.y };
+    p.intendedTarget = null;
+    p.commandLocked = true;
+    p.setPieceAnchor = { x: s.x, y: s.y }; // ยึดจุดโหม่งไว้จนบอลมาถึง
+  });
+  // ที่เหลือคุม second ball หน้ากรอบ + กันสวน (ไม่ดันเข้าไปรุม)
+  attackers.slice(4).forEach((p, i) => {
+    if (['CB', 'DM'].includes(p.role) && i < 2) return; // CB/DM ตัวแรกๆ ถอยกันสวน
+    p.targetX = clamp(goalX - dir * (20 + i * 3), 8, PITCH.length - 8);
+    p.targetY = clamp(34 + (i % 2 ? 8 : -8), 6, PITCH.width - 6);
+  });
+
   placeBallAtRestartSpot(state.ball, r.spot.x, r.spot.y);
   giveBall(state, taker);
+  // P3.2: ตั้งเป็นลูกตั้งเตะ → รอเป่านกหวีดแล้วเปิดเข้ากรอบลุ้นโหม่ง
+  state.setPiece = { type: 'corner', takerId: taker.id, deliverTick: SET_PIECE_WAIT_TICKS, whistled: false, side: r.spot.y < 34 ? 'top' : 'bottom' };
 }
 
 // penalty: auto-resolve ที่จังหวะเริ่มเล่น (MVP) — เข้า/เซฟ/rebound
@@ -1180,22 +1231,28 @@ function buildSetPieceCross(state, taker, type) {
     .filter((m) => m.id !== taker.id && m.role !== 'GK' && inBox(m));
   if (!boxMates.length) return null;
 
-  // เป้า = ตัวที่ marker ห่างสุด + อยู่โซนอันตราย + โหม่งดี (positioning/aggression)
+  // เป้า = ตัวที่ marker ห่างสุด + อยู่โซนอันตราย + โหม่งดี (+ สุ่มเล็กน้อยให้แต่ละลูกต่างกัน)
   let best = null, bestScore = -Infinity;
   for (const m of boxMates) {
     let marker = Infinity;
     for (const o of opps) { const d = distP(o, m); if (d < marker) marker = d; }
-    const danger = 1 - Math.min(distP(m, dangerSpot) / 16, 1);
-    const aerial = (m.positioning + m.aggression) / 200;
-    const score = marker * 0.5 + danger * 5 + aerial * 2;
+    const aim = m.runTarget || m;
+    const danger = 1 - Math.min(dist(aim.x, aim.y, dangerSpot.x, dangerSpot.y) / 16, 1);
+    const aerial = (m.positioning + m.aggression + m.shooting * 0.4) / 240;
+    const score = marker * 0.5 + danger * 4 + aerial * 2 + rand(0, 2.2);
     if (score > bestScore) { bestScore = score; best = m; }
   }
+  const aimPt = best.runTarget || best;        // เปิดไปจุดที่ตัวรับกำลังวิ่งไป
+  const tx = clamp(aimPt.x + dir * 0.5, 6, PITCH.length - 6);
+  const ty = clamp(aimPt.y, 18, 50);
+  // ระบุรูปแบบลูกเปิด: เสาแรก / กลาง(จุดโทษ) / เสาไกล — ใช้ตอนตัดสินจังหวะโหม่ง
+  const depth = Math.abs(goalX - tx);
+  let deliveryZone = 'central';
+  if (depth < 7) deliveryZone = 'near';
+  else if (depth > 11) deliveryZone = 'far';
   return {
-    type: 'cross', early: false, setPiece: type,
-    target: {
-      x: clamp(best.x + dir * 1, 6, PITCH.length - 6),
-      y: clamp(lerp(best.y, 34, 0.25), 22, 46),
-    },
+    type: 'cross', early: false, setPiece: type, deliveryZone,
+    target: { x: tx, y: ty },
     mate: best,
   };
 }
@@ -1216,11 +1273,17 @@ function logSetPiece(state, taker, type, action) {
 function decideCarrier(state, carrier) {
   const sim = state.sim;
 
-  // P2.9: ลูกตั้งเตะ — คนเตะต้องเปิด/ยิงเข้าเกม ไม่ใช่เลี้ยงเอง
+  // P2.9/P3.2: ลูกตั้งเตะ — รอเป่านกหวีดแล้วค่อยเปิด/ยิง (ไม่เลี้ยงเอง)
   if (state.setPiece && carrier.id === state.setPiece.takerId) {
     const sp = state.setPiece;
-    if (sim.tick < (sp.deliverTick ?? 4)) {
-      // ตั้งท่าก่อนเตะ ให้เพื่อนในกรอบขยับเข้าที่ ตัวเตะยืนนิ่งคาบอล
+    const deliverAt = sp.deliverTick ?? SET_PIECE_WAIT_TICKS;
+    // เป่านกหวีดล่วงหน้าก่อนสัมผัสบอล (ผู้ตัดสินให้สัญญาณ → แล้วค่อยเตะ)
+    if (!sp.whistled && sim.tick >= deliverAt - SET_PIECE_WHISTLE_LEAD) {
+      sp.whistled = true;
+      recordEvent(state, `Referee whistles — ${sp.type === 'corner' ? 'corner' : 'free kick'} ready`);
+    }
+    if (sim.tick < deliverAt) {
+      // ตั้งท่า: ตัวเตะยืนนิ่งคาบอล (ตัวรุกในกรอบกำลังวิ่งเข้าจุดโหม่ง)
       sim.carrierMove.set(carrier.id, { x: carrier.x, y: carrier.y, mode: 'hold' });
       return;
     }
@@ -1594,7 +1657,7 @@ export function evaluateCrossAction(state, carrier, pressure, shot) {
 
 function executeCross(state, carrier, action) {
   const sim = state.sim;
-  sim.pendingPass = { fromId: carrier.id, startX: state.ball.x, startY: state.ball.y, features: null, cross: true };
+  sim.pendingPass = { fromId: carrier.id, startX: state.ball.x, startY: state.ball.y, features: null, cross: true, setPiece: action.setPiece || null, deliveryZone: action.deliveryZone || null, targetMateId: action.mate?.id || null };
   // บอลโด่ง: ความแม่นต่ำกว่าบอลเรียบ และ early ball ยิ่งเสี่ยง
   const errMag = (1 - carrier.passing / 140) * rand(1, 5) + (action.early ? 1 : 0);
   const ang = rand(0, Math.PI * 2);
@@ -1614,36 +1677,85 @@ function executeCross(state, carrier, action) {
 // ชิงบอลโด่งในกรอบเมื่อ cross ตกถึงพื้นที่
 function resolveCrossArrival(state) {
   const b = state.ball;
-  const contenders = state.players.filter((p) => p.role !== 'GK' && distP(p, b) < 4.2);
+  const pp = state.sim.pendingPass || {};
+  const isCorner = pp.setPiece === 'corner';
+  const contenders = state.players.filter((p) => p.role !== 'GK' && distP(p, b) < 4.5);
 
   if (!contenders.length) {
     b.isLoose = true;
-    recordEvent(state, 'Cross sails through — ball loose');
+    recordEvent(state, isCorner ? 'Corner flies through the box — nobody got a touch' : 'Cross sails through — ball loose');
     state.sim.pendingPass = null;
     return;
   }
 
+  // ดวลลูกกลางอากาศ: ความสามารถโหม่ง = positioning + aggression + shooting*0.3 (+สุ่ม) ฝ่ายรับได้เปรียบนิดหน่อย
+  // ตัวที่ลูกเปิดเล็งหา (ไม่มีคนประกบ) ได้โบนัส → เกิดจังหวะโหม่งของฝ่ายรุกบ่อยพอควร
   let winner = null, bestW = -1;
   for (const c of contenders) {
     const atk = c.team === b.lastTouchTeam;
-    const w = c.positioning / 100
-      + c.aggression / 250
-      + (atk ? 0.08 : 0.12) // ฝ่ายรับได้เปรียบลูกกลางอากาศเล็กน้อย
-      + rand(0, 0.45)
+    const w = c.positioning / 100 + c.aggression / 250 + c.shooting * 0.003
+      + (atk ? 0.08 : 0.10)
+      + (c.id === pp.targetMateId ? 0.32 : 0)
+      + rand(0, 0.5)
       - distP(c, b) * 0.05;
     if (w > bestW) { bestW = w; winner = c; }
   }
-
-  giveBall(state, winner);
   state.sim.justReceived.set(winner.id, state.sim.tick);
-  if (winner.team === b.lastTouchTeam) {
-    recordEvent(state, `${winner.team === 'home' ? 'Our' : 'Their'} ${winner.role} meets the cross in the box!`);
-    state.sim.cooldowns.set(winner.id, 0.05); // จังหวะเดียว: ยิง/เฮดทันที
-  } else {
-    recordEvent(state, `Cross cleared — ${winner.team === 'home' ? 'our' : 'their'} ${winner.role} wins the aerial duel`);
-    noteTurnover(state, winner.team);
+
+  // ฝ่ายรับชนะ → โหม่งสกัด
+  if (winner.team !== b.lastTouchTeam) {
+    giveBall(state, winner);
+    const who = winner.team === 'home' ? 'our' : 'their';
+    if (isCorner && Math.random() < 0.25) {
+      // โขกออกหลังเส้น → ได้เตะมุมอีก
+      const goalX = winner.team === 'home' ? 0 : PITCH.length;
+      recordEvent(state, `Headed clear by ${who} ${winner.role} — out for another corner`);
+      createRestartEvent(state, 'corner', b.lastTouchTeam, { x: goalX, y: winner.y < 34 ? 0 : PITCH.width }, winner.y < 34 ? 'top' : 'bottom');
+    } else {
+      const dirAway = attackDir(winner.team);
+      makeLoose(state, dirAway * rand(8, 16), rand(-6, 6), rand(1, 3), 'loose');
+      markLastTouch(state.ball, winner);
+      markSecondBall(state, 'loose', winner.team);
+      recordEvent(state, `Headed clear by ${who} ${winner.role}`);
+      noteTurnover(state, winner.team);
+    }
+    state.sim.pendingPass = null;
+    return;
   }
+
+  // ฝ่ายรุกชนะ
+  giveBall(state, winner);
+  const who = winner.team === 'home' ? 'Our' : 'Their';
+  if (!isCorner) {
+    // open-play cross: จังหวะเดียว ตัดสินใจ (ยิง/เฮด) ผ่าน decideCarrier ปกติ
+    recordEvent(state, `${who} ${winner.role} meets the cross in the box!`);
+    state.sim.cooldowns.set(winner.id, 0.05);
+    state.sim.pendingPass = null;
+    return;
+  }
+
+  // ===== ลูกเตะมุม: โหม่งหลายรูปแบบ =====
+  const zone = pp.deliveryZone || 'central';
+  // เสาแรก: มีโอกาสโขกแปะ (flick-on) ให้เสาไกล → สร้างจังหวะสอง
+  if (zone === 'near' && Math.random() < NEAR_POST_FLICK_CHANCE) {
+    const dir = attackDir(winner.team);
+    const goalX = dir === 1 ? PITCH.length : 0;
+    const farY = winner.y < 34 ? 40 : 28;
+    recordEvent(state, `${who} ${winner.role} flicks on at the near post!`);
+    state.ball.x = winner.x; state.ball.y = winner.y;
+    makeLoose(state, (goalX - winner.x) * 0.18, (farY - winner.y) * 0.5, rand(1.5, 3), 'loose');
+    markLastTouch(state.ball, winner);
+    markSecondBall(state, 'loose', winner.team);
+    state.sim.pendingPass = null;
+    return;
+  }
+
+  // โหม่งจบ: ใช้ shot pipeline เดิมแต่เป็นลูกโหม่ง (xG ต่ำกว่า + ป้าย "Header")
+  const headerWord = zone === 'near' ? 'glancing header' : zone === 'far' ? 'far-post header' : 'powerful header';
+  recordEvent(state, `${who} ${winner.role} rises for a ${headerWord}!`);
+  const pressure = computePressure(state, winner);
   state.sim.pendingPass = null;
+  attemptShot(state, winner, distP(winner, goalAttackedBy(winner.team)), pressure, 'box', 'header');
 }
 
 function carryAbility(p) {
@@ -2032,7 +2144,7 @@ function resolveSaveFlavor(gk, owner, target) {
   return target.cornered > 0.45 ? 'parried' : 'rebound';
 }
 
-function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
+function attemptShot(state, owner, dGoal, pressure, zone = 'normal', shotKind = 'foot') {
   const sim = state.sim;
   const dir = attackDir(owner.team);
   const goal = goalAttackedBy(owner.team);
@@ -2040,10 +2152,12 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
   const who = ours ? 'Our' : 'Their';
   const defTeam = ours ? 'away' : 'home';
   const gk = teamPlayers(state, defTeam).find((p) => p.role === 'GK');
+  const isHeader = shotKind === 'header';
+  const noun = isHeader ? 'Header' : 'Shot';
 
-  // 1) context + 2) xG
+  // 1) context + 2) xG (ลูกโหม่งทำประตูยากกว่าลูกเท้า)
   const ctx = evaluateShotContext(state, owner, pressure, gk);
-  const xg = calculateXG(ctx, owner);
+  const xg = calculateXG(ctx, owner) * (isHeader ? HEADER_XG_FACTOR : 1);
   markShotLastTouch(state.ball, owner);
   sim.stats[owner.team].shots++;
   sim.stats[owner.team].xg += xg;
@@ -2051,8 +2165,8 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
   bumpMatch(state, owner.team, 'xg', xg);
   const isBig = xg >= BIG_CHANCE_XG;
   if (isBig) bumpMatch(state, owner.team, 'bigChances');
-  recordEvent(state, `Shot chance! ${who} ${owner.role} from ${Math.round(dGoal)}m (xG ${xg.toFixed(2)})${isBig ? ' [BIG CHANCE]' : ''}`);
-  recordStructuredEvent(state, { type: 'SHOT', team: owner.team, xg: +xg.toFixed(2), zone: ctx.zone });
+  recordEvent(state, `${noun} chance! ${who} ${owner.role} from ${Math.round(dGoal)}m (xG ${xg.toFixed(2)})${isBig ? ' [BIG CHANCE]' : ''}`);
+  recordStructuredEvent(state, { type: 'SHOT', team: owner.team, xg: +xg.toFixed(2), zone: ctx.zone, kind: shotKind });
 
   const cornerSpot = { x: goal.x, y: owner.y < 34 ? 0 : PITCH.width };
   const cornerSide = owner.y < 34 ? 'top' : 'bottom';
@@ -2064,7 +2178,7 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
     sim.stats[owner.team].shotsOnTarget++;
     bumpMatch(state, owner.team, 'shotsOnTarget');
     setBallFx(state, 'GOAL');
-    recordEvent(state, `Shot — ${target.zone} — GOAL! (${who} ${owner.role})`);
+    recordEvent(state, `${noun} — ${target.zone} — GOAL! (${who} ${owner.role})`);
     handleGoal(state, owner.team); // นับ matchStats.goals ภายใน
     return;
   }
@@ -2110,7 +2224,8 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
 
   // 5) on target (saved) vs off target (wide) — ความแม่นจาก target.aim
   if (!gk || Math.random() >= target.aim) {
-    recordEvent(state, isBig ? `Big chance missed — ${who} ${owner.role} shoots wide` : `${who} ${owner.role} shoots wide`);
+    const verb = isHeader ? 'heads it wide' : 'shoots wide';
+    recordEvent(state, isBig ? `Big chance missed — ${who} ${owner.role} ${verb}` : `${who} ${owner.role} ${verb}`);
     createRestartEvent(state, 'goalKick', defTeam, backLineSpot(state, bylineSide, false), bylineSide);
     return;
   }
@@ -2123,7 +2238,7 @@ function attemptShot(state, owner, dGoal, pressure, zone = 'normal') {
   const flavor = resolveSaveFlavor(gk, owner, target);
   setBallFx(state, 'Save');
   if (flavor === 'held') {
-    recordEvent(state, `Shot ${target.zone} — saved, ${gk.team === 'home' ? 'our' : 'their'} keeper holds it`);
+    recordEvent(state, `${noun} ${target.zone} — saved, ${gk.team === 'home' ? 'our' : 'their'} keeper holds it`);
     giveBall(state, gk);
   } else if (flavor === 'parried') {
     recordEvent(state, `Great save! ${gk.team === 'home' ? 'Our' : 'Their'} GK tips the ${target.zone} effort over — corner`);
@@ -2284,6 +2399,16 @@ function carrierDesired(state, p) {
 function offBallDesired(state, p, owner) {
   const b = state.ball;
   const phase = state.teamPhases[p.team];
+
+  // P3.2: ลูกตั้งเตะ — ตัวรับลูกโหม่งยึดจุดในกรอบไว้ (ระหว่างรอนกหวีด + ระหว่างบอลลอยเข้า)
+  // ไม่ให้ logic เกมรุกปกติดึงออกจากกรอบ จนไม่มีคนอยู่ตอนบอลตก
+  if (p.setPieceAnchor) {
+    const cornerCrossInFlight = b.inFlight && state.sim?.pendingPass?.cross && b.lastTouchTeam === p.team;
+    if (state.setPiece || cornerCrossInFlight) {
+      return { x: p.setPieceAnchor.x, y: p.setPieceAnchor.y, urgency: 1, pressing: false };
+    }
+    p.setPieceAnchor = null; // บอลถึง/เคลียร์แล้ว เล่นปกติ
+  }
 
   // GK
   if (p.role === 'GK') {
