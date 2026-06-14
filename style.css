@@ -213,6 +213,48 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .sq-attrs { display: none; }
 }
 
+/* ---------- P3.1 Arcade team select ---------- */
+.ts-box { max-width: 980px; }
+.ts-vs {
+  display: flex; align-items: center; gap: 16px; justify-content: center;
+  margin: 6px 0 12px;
+}
+.ts-side { flex: 1; background: var(--card); border-radius: 10px; padding: 10px 14px; }
+.ts-you { border-left: 4px solid var(--accent); }
+.ts-opp { border-left: 4px solid var(--danger); }
+.ts-label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+.ts-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; min-height: 26px; }
+.ts-mid { font-size: 22px; font-weight: 800; color: var(--muted); }
+.ts-actions { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.ts-start { flex: 1; }
+.ts-start:disabled { opacity: 0.5; }
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.team-card {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  background: var(--card); border: 2px solid transparent; border-radius: 10px;
+  padding: 10px 8px; cursor: pointer; text-align: center;
+}
+.team-card:hover { background: var(--card2); }
+.team-card.pick-home { border-color: var(--accent); background: #20304d; }
+.team-card.pick-away { border-color: var(--danger); background: #3a2230; }
+.tc-badge {
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #fff;
+  border: 2px solid #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.tc-badge.sm { width: 26px; height: 26px; font-size: 9px; border-width: 1.5px; }
+.tc-name { font-size: 12px; font-weight: 600; line-height: 1.2; }
+.tc-stars { font-size: 11px; color: #f2c94c; letter-spacing: -1px; }
+.tc-stars.sm { font-size: 10px; }
+.ts-note { font-size: 11px; margin-top: 10px; }
+
 select, input[type="range"] {
   background: var(--card2);
   color: var(--text);
